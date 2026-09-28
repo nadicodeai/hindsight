@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hindsight-api-slim"
-version = "0.10.2"
+version = "0.10.2+nadia.1"
 description = "Hindsight: Agent Memory That Learns"
 license = "MIT"
 readme = "README.md"
@@ -36,6 +36,8 @@ dependencies = [
     # Contained to engine/token_encoding.py — see that module for the rationale.
     "toktok-rs>=0.1.3", # 0.1.3 adds truncate()/batch_truncate()
     "httpx>=0.27.0",
+    # Core, not an extra: extensions/__init__.py imports extensions/mcp.py, which
+    # imports fastmcp at module top, and server.py imports that package on every start.
     "fastmcp>=3.2.0", # SSRF/path traversal, OAuth confused deputy, command injection fixes
     "python-dateutil>=2.8.0",
     # Two coupled reasons for these floors — keep all six pins moving together:
@@ -62,31 +64,11 @@ dependencies = [
     # engine/query_analyzer.py _DATEPARSER_LOCK), so this is the second of two
     # independent guards, not the only one.
     "regex>=2026.9.3",
+    # Core, not an extra: engine/providers/__init__.py imports gemini_llm, which
+    # imports google.genai at module top, and every provider import runs that package.
     "google-genai>=1.72.0",
     "google-auth>=2.0.0",
-    "anthropic>=0.40.0",
     "typer>=0.9.0",
-    "cohere>=5.0.0",
-    # 1.82.7/1.82.8 had a supply chain compromise (yanked); 1.83.0+ also fixes
-    # GHSA-jjhc-v7c2-5hh6 / GHSA-53mr-6c8q-9789 / GHSA-pq44-5pcq-4r5g /
-    # GHSA-8cjq-wjmh-q42r; 1.84.0 fixes GHSA-4xpc-pv4p-pm3w.
-    # Floor raised to 1.93.0 for Python 3.14: litellm ships its own Rust
-    # extension (litellm-rust python-bridge). Releases before 1.93.0 publish no
-    # cp314 wheel and their sdist fails to build because PyO3 0.23.5 rejects
-    # any interpreter newer than 3.13. 1.93.0 adds cp314 wheels and a PyO3 that
-    # builds on 3.14.
-    "litellm>=1.93.0; sys_platform != 'darwin'",
-    # macOS: litellm publishes NO macOS wheels for any release >= 1.92.0 (only
-    # manylinux + win_amd64), so every install compiles the sdist's Rust/PyO3
-    # bridge — which requires a Rust toolchain most users don't have, and as of
-    # 1.95.0 (vendored aws-smithy crates) rustc >= 1.94.1 on top. Pin to the
-    # 1.91.x line, the last releases shipping pure-python py3-none-any wheels,
-    # so a plain `uvx hindsight-api` works on a stock Mac. The 1.93.0 floor's
-    # Python 3.14 rationale doesn't apply here: pure wheels install on any
-    # interpreter without building anything. Revisit when litellm ships macOS
-    # wheels (tracked upstream in BerriAI/litellm#31261).
-    "litellm>=1.91.3,<1.92; sys_platform == 'darwin'",
-    "markitdown[pdf,docx,pptx,xlsx,xls]>=0.1.4", # File to markdown conversion
     "obstore>=0.4.0", # S3/GCS/Azure object storage client (Rust-backed)
     "winloop>=0.1.0; sys_platform == 'win32'",
     "uvloop>=0.22.1; sys_platform != 'win32'",
@@ -102,9 +84,6 @@ dependencies = [
     "python-multipart>=0.0.22", # Arbitrary file write via non-default configuration fix
     "aiohttp>=3.14.3", # GHSA-cq5v-8q36-5273: OOB heap read in the C response parser, plus earlier DoS fixes
     "pygments>=2.20.0", # ReDoS via inefficient GUID regex fix
-    "claude-agent-sdk>=0.2.82",
-    "github-copilot-sdk>=1.0.11",
-    "boto3>=1.42.74",
     "croniter>=2.0.0", # Cron parsing for scheduled mental model refresh
     "json-repair>=0.63.2", # Structural repair of malformed LLM JSON (last-resort parse fallback); >=0.60.1 also fixes the circular-$ref unbounded-CPU DoS
     "orjson>=3.11.0", # Fast JSON encode/decode on the recall path (audit rows, TEI embedding responses); 3.11 ships 3.14 wheels
@@ -112,6 +91,42 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Provider SDKs and the file parser. Each is imported inside the provider or the
+# parser that uses it, so a server configured without them starts and runs.
+anthropic = [
+    "anthropic>=0.40.0",
+]
+claude-code = [
+    "claude-agent-sdk>=0.2.82",
+]
+cohere = [
+    "cohere>=5.0.0",
+]
+copilot = [
+    "github-copilot-sdk>=1.0.11",
+]
+litellm = [
+    # 1.82.7/1.82.8 had a supply chain compromise (yanked); 1.83.0+ also fixes
+    # GHSA-jjhc-v7c2-5hh6 / GHSA-53mr-6c8q-9789 / GHSA-pq44-5pcq-4r5g /
+    # GHSA-8cjq-wjmh-q42r; 1.84.0 fixes GHSA-4xpc-pv4p-pm3w.
+    # Floor 1.95.1: every release from it on ships cp314 wheels and macOS
+    # wheels (arm64 and x86_64), so one floor serves every platform and the
+    # darwin carve-out to the 1.91.x line, which declares requires-python <3.14,
+    # is gone.
+    "litellm>=1.95.1",
+]
+bedrock = [
+    # Bedrock is served through litellm's bedrock/ models, which need boto3.
+    "hindsight-api-slim[litellm]",
+    "boto3>=1.42.74",
+]
+files = [
+    # File to markdown conversion; without it, file retain is disabled with a warning.
+    "markitdown[pdf,docx,pptx,xlsx,xls]>=0.1.4",
+]
+providers = [
+    "hindsight-api-slim[anthropic,claude-code,cohere,copilot,litellm,bedrock]",
+]
 local-ml = [
     # Local ML models for embeddings/reranking
     # 5.0 is the floor: LocalSTEmbeddings calls SentenceTransformer.encode_query()
@@ -163,7 +178,7 @@ oracle = [
     "oracledb>=2.5.0",
 ]
 all = [
-    "hindsight-api-slim[local-ml,local-onnx,embedded-db]",
+    "hindsight-api-slim[providers,files,local-ml,local-onnx,embedded-db]",
 ]
 test = [
     "pytest>=7.0.0",
