@@ -115,12 +115,14 @@ def test_an_outside_sender_cannot_search_another_person(provider, monkeypatch):
 
 def test_the_name_lookup_skips_inside_people_and_the_company(provider, monkeypatch):
     instance, _ = provider(INSIDE, platform="buzz", user_id="ab12")
-    listing = {"banks": [
-        {"bank_id": "person-whatsapp-1", "name": "Giulia Rossi"},
-        {"bank_id": "person-buzz-ab99", "name": "Rossi the colleague"},
-        {"bank_id": "person-owner", "name": "Rossi"},
-        {"bank_id": "company", "name": "Rossi"},
-    ]}
+    listing = {
+        "banks": [
+            {"bank_id": "person-whatsapp-1", "name": "Giulia Rossi"},
+            {"bank_id": "person-buzz-ab99", "name": "Rossi the colleague"},
+            {"bank_id": "person-owner", "name": "Rossi"},
+            {"bank_id": "company", "name": "Rossi"},
+        ]
+    }
 
     class _Resp:
         def __enter__(self):

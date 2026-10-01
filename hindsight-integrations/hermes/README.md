@@ -245,7 +245,7 @@ The lookup stops at the repository root. Only `bank_id` is read.
 | `recall_min_scores` | — | Minimum relevance per score field, as a JSON object (e.g. `{"reranker": 0.25}` or `{"semantic": 0.5}`). Applies to both auto-recall and the `long_term_memory_search` tool. See the tip below. |
 | `auto_recall` | `true` | Automatically recall memories before each turn |
 | `recall_sync` | `false` | Recall synchronously against the *current* message each turn (higher relevance, adds recall latency). Default off: recall runs in the background and is injected on the next turn. |
-| `recall_indicator` | `true` | Show a `👁️ Long-term memory — recalled N memories` status line when auto-recall injects memory. Turn off for customer-facing agents. |
+| `recall_indicator` | `true` | Show a `👁️ Nadia long-term memory — recalled N memories` status line when auto-recall injects memory. Turn off for customer-facing agents. |
 
 > **Behavior change — `recall_types` defaults to `observation` only.**
 >
@@ -277,7 +277,7 @@ The lookup stops at the repository root. Only `bank_id` is read.
 | `retain_tags` | — | Default tags applied to retained memories; merged with per-call tool tags |
 | `retain_source` | — | Opt-in `metadata.source` attached to retained memories (identifies the storing client, e.g. `hermes`). Empty by default — no attribution tag ships unless you set it. |
 | `retain_strategy` | — | Named retain strategy sent with every stored item (`HINDSIGHT_RETAIN_STRATEGY`). The bank must define it under `retain_strategies`; an unknown name is ignored by the server. Empty lets the bank decide. |
-| `retain_indicator` | `true` | Show a `👁️ Saving to long-term memory…` status line when a turn is saved. Turn off for customer-facing agents. |
+| `retain_indicator` | `true` | Show a `👁️ Saving to Nadia long-term memory…` status line when a turn is saved. Turn off for customer-facing agents. |
 | `retain_user_prefix` | `User` | Label used before user turns in auto-retained transcripts |
 | `retain_assistant_prefix` | `Assistant` | Label used before assistant turns in auto-retained transcripts |
 
@@ -357,7 +357,7 @@ The provider works across every gateway platform. Hermes builds a fresh agent pe
 provider is re-initialized with it, so auto-recall runs for each turn regardless of platform.
 
 Two settings are worth turning off for customer-facing bots: `recall_indicator` and
-`retain_indicator`, which otherwise print a `👁️` long-term memory status line into the user's channel.
+`retain_indicator`, which otherwise print a `👁️` Nadia long-term memory status line into the user's channel.
 
 ## Disabling Hermes' built-in memory
 
