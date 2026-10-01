@@ -123,7 +123,7 @@ def test_prefetch_injects_recalled_memories(provider):
     block = instance.prefetch("what do you know?")
     assert "- fact one" in block
     status = instance.recall_status()
-    assert status.count == 1 and status.provider_label == "Long-term memory"
+    assert status.count == 1 and status.provider_label == "Nadia long-term memory"
     instance.shutdown()
 
 
