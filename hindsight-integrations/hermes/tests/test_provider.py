@@ -184,7 +184,7 @@ def test_recall_tool_queries_the_bank_and_formats_results(provider):
     instance, fake = provider(
         {"bank_id": "team", "recall_budget": "high"}, client=FakeClient(recall_texts=["fact one", "fact two"])
     )
-    result = json.loads(instance.handle_tool_call("hindsight_recall", {"query": "who am I?"}))
+    result = json.loads(instance.handle_tool_call("long_term_memory_search", {"query": "who am I?"}))
 
     assert fake.recalls[0]["bank_id"] == "team"
     assert fake.recalls[0]["budget"] == "high"
@@ -195,7 +195,7 @@ def test_recall_tool_queries_the_bank_and_formats_results(provider):
 
 def test_recall_sends_no_score_floor_by_default(provider):
     instance, fake = provider({}, client=FakeClient(recall_texts=["fact one"]))
-    instance.handle_tool_call("hindsight_recall", {"query": "who am I?"})
+    instance.handle_tool_call("long_term_memory_search", {"query": "who am I?"})
     assert "min_scores" not in fake.recalls[0]
     instance.shutdown()
 
@@ -204,7 +204,7 @@ def test_recall_min_scores_reaches_the_tool_and_the_prefetch(provider):
     instance, fake = provider(
         {"recall_sync": True, "recall_min_scores": {"reranker": 0.25}}, client=FakeClient(recall_texts=["fact one"])
     )
-    instance.handle_tool_call("hindsight_recall", {"query": "who am I?"})
+    instance.handle_tool_call("long_term_memory_search", {"query": "who am I?"})
     instance.prefetch("what do you know?")
     assert [call["min_scores"] for call in fake.recalls] == [{"reranker": 0.25}] * 2
     instance.shutdown()
@@ -212,7 +212,7 @@ def test_recall_min_scores_reaches_the_tool_and_the_prefetch(provider):
 
 def test_recall_min_scores_accepts_the_json_string_the_setup_wizard_writes(provider):
     instance, fake = provider({"recall_min_scores": '{"reranker": 0.25}'}, client=FakeClient(recall_texts=["x"]))
-    instance.handle_tool_call("hindsight_recall", {"query": "q"})
+    instance.handle_tool_call("long_term_memory_search", {"query": "q"})
     assert fake.recalls[0]["min_scores"] == {"reranker": 0.25}
     instance.shutdown()
 
@@ -222,7 +222,7 @@ def test_recall_with_an_empty_answer_stays_an_empty_block(provider):
     instance, fake = provider({"recall_sync": True, "recall_min_scores": {"reranker": 0.9}}, client=FakeClient())
     assert instance.prefetch("something off topic") == ""
     assert fake.recalls[0]["min_scores"] == {"reranker": 0.9}
-    assert json.loads(instance.handle_tool_call("hindsight_recall", {"query": "q"}))["result"] == (
+    assert json.loads(instance.handle_tool_call("long_term_memory_search", {"query": "q"}))["result"] == (
         "No relevant memories found."
     )
     instance.shutdown()
@@ -234,7 +234,7 @@ def test_recall_min_scores_is_enforced_on_each_result_the_server_returns(provide
     # floor really abstains.
     results = [("kept", {"semantic": 0.7}), ("weak", {"semantic": 0.3}), ("other arm", {"semantic": None})]
     instance, fake = provider({"recall_min_scores": {"semantic": 0.5}}, client=FakeClient(recall_texts=results))
-    result = json.loads(instance.handle_tool_call("hindsight_recall", {"query": "q"}))
+    result = json.loads(instance.handle_tool_call("long_term_memory_search", {"query": "q"}))
     assert result["result"] == "1. kept"
     assert fake.recalls[0]["min_scores"] == {"semantic": 0.5}
     instance.shutdown()
@@ -246,7 +246,7 @@ def test_recall_min_scores_drops_the_whole_block_when_nothing_clears_it(provider
         {"recall_sync": True, "recall_min_scores": {"semantic": 0.5}}, client=FakeClient(recall_texts=results)
     )
     assert instance.prefetch("something off topic") == ""
-    assert json.loads(instance.handle_tool_call("hindsight_recall", {"query": "q"}))["result"] == (
+    assert json.loads(instance.handle_tool_call("long_term_memory_search", {"query": "q"}))["result"] == (
         "No relevant memories found."
     )
     instance.shutdown()
@@ -254,7 +254,7 @@ def test_recall_min_scores_drops_the_whole_block_when_nothing_clears_it(provider
 
 def test_reflect_tool_uses_reflect(provider):
     instance, fake = provider({}, client=FakeClient(reflect_text="You are Ada."))
-    result = json.loads(instance.handle_tool_call("hindsight_reflect", {"query": "who am I?"}))
+    result = json.loads(instance.handle_tool_call("long_term_memory_reflect", {"query": "who am I?"}))
     assert fake.reflects[0]["query"] == "who am I?"
     assert result["result"] == "You are Ada."
     instance.shutdown()
@@ -262,7 +262,7 @@ def test_reflect_tool_uses_reflect(provider):
 
 def test_retain_tool_stores_content_with_per_call_tags(provider):
     instance, fake = provider({"retain_tags": "base"})
-    instance.handle_tool_call("hindsight_retain", {"content": "Ada likes tea", "tags": ["drink"]})
+    instance.handle_tool_call("long_term_memory_save", {"content": "Ada likes tea", "tags": ["drink"]})
     item = _retain_item(fake)
     assert item["content"] == "Ada likes tea"
     assert item["tags"] == ["base", "drink"]
@@ -289,14 +289,14 @@ def test_mirror_builtin_memory_off_keeps_builtin_writes_out_of_the_bank(provider
     instance, fake = provider({"mirror_builtin_memory": False})
     instance.on_memory_write("add", "memory", "Deploys go through Fly.io")
     instance.on_memory_write("replace", "user", "Ada prefers tea")
-    instance.handle_tool_call("hindsight_retain", {"content": "Ada likes tea"})
+    instance.handle_tool_call("long_term_memory_save", {"content": "Ada likes tea"})
     instance.shutdown()
     assert [_retain_item(fake, i)["content"] for i in range(len(fake.retains))] == ["Ada likes tea"]
 
 
 def test_tool_call_errors_are_reported_not_raised(provider):
     instance, _ = provider({})
-    assert instance.handle_tool_call("hindsight_recall", {}).startswith("ERROR:")
+    assert instance.handle_tool_call("long_term_memory_search", {}).startswith("ERROR:")
     assert instance.handle_tool_call("nope", {"query": "x"}).startswith("ERROR:")
     instance.shutdown()
 
@@ -311,9 +311,22 @@ class _EmptyServerClient(FakeClient):
 
 def test_searching_a_bank_nothing_was_saved_to_finds_nothing(provider):
     instance, _ = provider({}, client=_EmptyServerClient())
-    for tool in ("hindsight_recall", "hindsight_reflect"):
+    for tool in ("long_term_memory_search", "long_term_memory_reflect"):
         result = json.loads(instance.handle_tool_call(tool, {"query": "who am I?"}))
         assert result == {"result": "No relevant memories found."}
+    instance.shutdown()
+
+
+class _UnreachableClient(FakeClient):
+    async def arecall(self, **kwargs):
+        raise ConnectionError("Cannot connect to host 127.0.0.1:47830")
+
+
+def test_a_failed_tool_call_names_the_failure_without_the_exception(provider):
+    instance, _ = provider({}, client=_UnreachableClient())
+    result = instance.handle_tool_call("long_term_memory_search", {"query": "who am I?"})
+    assert "Failed to search memory" in result
+    assert "127.0.0.1" not in result
     instance.shutdown()
 
 
@@ -322,7 +335,7 @@ def test_prefetch_injects_recalled_memories(provider):
     block = instance.prefetch("what do you know?")
     assert "- fact one" in block
     status = instance.recall_status()
-    assert status.count == 1 and status.provider_label == "Hindsight"
+    assert status.count == 1 and status.provider_label == "Long-term memory"
     instance.shutdown()
 
 
@@ -376,7 +389,7 @@ def test_read_only_tool_names_are_recall_and_page_reads(provider):
     instance, _ = provider({"memory_mode": "tools"})
     names = {schema["name"] for schema in instance.get_tool_schemas()}
     assert instance.read_only_tool_names() == [
-        "hindsight_recall",
+        "long_term_memory_search",
         "hindsight_search_pages",
         "hindsight_read_page",
         "hindsight_list_pages",
@@ -392,9 +405,9 @@ def test_context_mode_hides_tools_tools_mode_skips_recall(provider):
 
     tools_only, fake = provider({"memory_mode": "tools", "recall_sync": True})
     assert [t["name"] for t in tools_only.get_tool_schemas()] == [
-        "hindsight_retain",
-        "hindsight_recall",
-        "hindsight_reflect",
+        "long_term_memory_save",
+        "long_term_memory_search",
+        "long_term_memory_reflect",
         "hindsight_search_pages",
         "hindsight_read_page",
         "hindsight_list_pages",
@@ -521,8 +534,8 @@ def test_system_prompt_guides_tool_choice_only_when_tools_exist(provider):
     assert "session_search" not in blocks["context"]
     assert "automatically injected" in blocks["context"]
     for mode in ("tools", "hybrid"):
-        assert "prefer hindsight_recall over session_search" in blocks[mode]
-        assert "hindsight_reflect" in blocks[mode] and "hindsight_retain" in blocks[mode]
+        assert "prefer long_term_memory_search over session_search" in blocks[mode]
+        assert "long_term_memory_reflect" in blocks[mode] and "long_term_memory_save" in blocks[mode]
     assert "automatically injected" in blocks["hybrid"]
     assert "automatically injected" not in blocks["tools"]
 
@@ -806,26 +819,27 @@ def test_version_falls_back_to_the_control_plane_path(version_probe):
 def test_retain_tool_honours_retain_async(provider):
     """#4662: the tool blocked on a sync retain whatever retain_async said."""
     instance, fake = provider({})
-    result = json.loads(instance.handle_tool_call("hindsight_retain", {"content": "Ada likes tea"}))
+    result = json.loads(instance.handle_tool_call("long_term_memory_save", {"content": "Ada likes tea"}))
     assert fake.retains[0]["retain_async"] is True
     assert result["result"] == "Memory queued for storage."
 
     instance, fake = provider({"retain_async": False})
-    result = json.loads(instance.handle_tool_call("hindsight_retain", {"content": "Ada likes tea"}))
+    result = json.loads(instance.handle_tool_call("long_term_memory_save", {"content": "Ada likes tea"}))
     assert fake.retains[0]["retain_async"] is False
     assert result["result"] == "Memory stored successfully."
 
 
-def test_a_tool_error_with_no_message_still_says_what_failed(provider):
-    """#4662: a timeout's str() is empty, which left the agent a bare 'Failed to search memory: '."""
+def test_a_tool_error_says_what_failed_without_the_exception_text(provider):
+    """#4662: a timeout's str() is empty, which left the agent a bare 'Failed to search memory: '.
+    Nadia names the failed operation alone: the exception text never reaches the model."""
 
     class TimingOut(FakeClient):
         async def arecall(self, **kwargs):
             raise TimeoutError()
 
     instance, _ = provider({}, client=TimingOut())
-    result = instance.handle_tool_call("hindsight_recall", {"query": "q"})
-    assert result.endswith("Failed to search memory: TimeoutError")
+    result = instance.handle_tool_call("long_term_memory_search", {"query": "q"})
+    assert result == "ERROR: Failed to search memory"
 
 
 def test_a_slow_prefetch_never_overwrites_a_newer_one(provider):
@@ -855,7 +869,7 @@ def test_a_slow_prefetch_never_overwrites_a_newer_one(provider):
 def test_recall_exclude_tags_send_a_not_group_and_keep_untagged_memories(provider):
     """#5375: excluded tags go out as a strict NOT group, on both recall paths."""
     instance, fake = provider({"recall_exclude_tags": "source:bot, cron"})
-    instance.handle_tool_call("hindsight_recall", {"query": "q"})
+    instance.handle_tool_call("long_term_memory_search", {"query": "q"})
     instance._do_recall("q")
     assert len(fake.recalls) == 2
     for call in fake.recalls:
@@ -868,7 +882,7 @@ def test_recall_exclude_tags_combine_with_recall_tags(provider):
     instance, fake = provider(
         {"recall_tags": ["team"], "recall_tags_match": "all", "recall_exclude_tags": ["source:bot"]}
     )
-    instance.handle_tool_call("hindsight_recall", {"query": "q"})
+    instance.handle_tool_call("long_term_memory_search", {"query": "q"})
     assert fake.recalls[0]["tag_groups"] == [
         {"tags": ["team"], "match": "all"},
         {"not": {"tags": ["source:bot"], "match": "any_strict"}},
@@ -878,7 +892,7 @@ def test_recall_exclude_tags_combine_with_recall_tags(provider):
 
 def test_empty_recall_exclude_tags_leave_the_request_unchanged(provider):
     instance, fake = provider({"recall_tags": "team", "recall_exclude_tags": ""})
-    instance.handle_tool_call("hindsight_recall", {"query": "q"})
+    instance.handle_tool_call("long_term_memory_search", {"query": "q"})
     assert fake.recalls[0]["tags"] == ["team"]
     assert "tag_groups" not in fake.recalls[0]
 
@@ -886,7 +900,7 @@ def test_empty_recall_exclude_tags_leave_the_request_unchanged(provider):
 def test_recall_tags_accept_the_documented_comma_separated_form(provider):
     """#4662: the string went to the client as-is and the API rejected it (422)."""
     instance, fake = provider({"recall_tags": "team, project-x"})
-    instance.handle_tool_call("hindsight_recall", {"query": "q"})
+    instance.handle_tool_call("long_term_memory_search", {"query": "q"})
     assert fake.recalls[0]["tags"] == ["team", "project-x"]
 
 
@@ -919,7 +933,7 @@ def test_prompt_does_not_promise_injected_memories_when_auto_recall_is_off(provi
 def test_prompt_tells_the_model_to_store_corrections(provider, config):
     """#5373: the model was never told what to do when a memory is wrong, so it rarely stored a fix."""
     instance, _ = provider(config)
-    assert "store the correction with hindsight_retain" in instance.system_prompt_block()
+    assert "store the correction with long_term_memory_save" in instance.system_prompt_block()
 
 
 def test_reconnect_closes_the_client_it_replaces(provider, monkeypatch):
@@ -939,7 +953,7 @@ def test_reconnect_closes_the_client_it_replaces(provider, monkeypatch):
     instance._mode, instance._client = "local_embedded", dead
     monkeypatch.setattr(instance, "_new_embedded_client", lambda: fresh)
 
-    result = json.loads(instance.handle_tool_call("hindsight_recall", {"query": "q"}))
+    result = json.loads(instance.handle_tool_call("long_term_memory_search", {"query": "q"}))
     assert result["result"] == "1. back"
     assert Dead.closed
 
@@ -999,7 +1013,7 @@ def test_cron_runs_are_not_auto_retained(provider):
     """#4945: Hermes passes agent_context="cron" for scheduled jobs; the contract is to skip writes."""
     cron, fake = provider({}, agent_context="cron")
     cron.sync_turn("daily digest", "here is the news")
-    cron.handle_tool_call("hindsight_retain", {"content": "an explicit note"})  # the tool still works
+    cron.handle_tool_call("long_term_memory_save", {"content": "an explicit note"})  # the tool still works
     cron.shutdown()
     assert [call["items"][0]["content"] for call in fake.retains] == ["an explicit note"]
 
@@ -1085,14 +1099,14 @@ def test_reflect_tags_scope_reflect(provider):
         {"reflect_tags": "team, project-x", "reflect_tags_match": "all", "recall_tags": "other"},
         client=FakeClient(reflect_text="synthesis"),
     )
-    instance.handle_tool_call("hindsight_reflect", {"query": "q"})
+    instance.handle_tool_call("long_term_memory_reflect", {"query": "q"})
     assert fake.reflects[0]["tags"] == ["team", "project-x"]
     assert fake.reflects[0]["tags_match"] == "all"
 
 
 def test_reflect_without_reflect_tags_uses_the_whole_bank(provider):
     instance, fake = provider({"recall_tags": "team"}, client=FakeClient(reflect_text="synthesis"))
-    instance.handle_tool_call("hindsight_reflect", {"query": "q"})
+    instance.handle_tool_call("long_term_memory_reflect", {"query": "q"})
     assert "tags" not in fake.reflects[0]
 
 
@@ -1136,7 +1150,7 @@ class _StaleOnceClient(FakeClient):
 def test_a_stale_keepalive_connection_is_retried_for_a_recall(provider):
     """#5734: outside local_embedded a dropped idle connection failed the turn's recall outright."""
     instance, fake = provider({}, client=_StaleOnceClient())
-    result = json.loads(instance.handle_tool_call("hindsight_recall", {"query": "tea?"}))
+    result = json.loads(instance.handle_tool_call("long_term_memory_search", {"query": "tea?"}))
     assert "Ada likes tea" in result["result"]
     assert len(fake.recalls) == 1
 
@@ -1145,8 +1159,8 @@ def test_a_sync_retain_is_not_resent_after_a_dropped_connection(provider):
     """The server may have stored a retain it dropped mid-way; without an operation id to replay
     under, resending it would store it twice."""
     instance, fake = provider({"retain_async": False}, client=_StaleOnceClient())
-    result = instance.handle_tool_call("hindsight_retain", {"content": "Ada likes tea"})
-    assert "Server disconnected" in result
+    result = instance.handle_tool_call("long_term_memory_save", {"content": "Ada likes tea"})
+    assert "Failed to store memory" in result
     assert fake.retains == []
     instance.shutdown()
 
@@ -1190,7 +1204,7 @@ def test_a_failed_background_recall_reaches_the_next_turn(provider):
 def test_tool_results_keep_non_ascii_text(provider):
     """#6561: \\uXXXX escapes cost ~3x the tokens for CJK text."""
     instance, _ = provider({}, client=FakeClient(recall_texts=["用户喜欢咖啡"]))
-    raw = instance.handle_tool_call("hindsight_recall", {"query": "咖啡"})
+    raw = instance.handle_tool_call("long_term_memory_search", {"query": "咖啡"})
     assert "用户喜欢咖啡" in raw and "\\u" not in raw
     instance.shutdown()
 
@@ -1222,8 +1236,8 @@ def test_reflect_budget_is_set_apart_from_recall(provider):
         {"recall_budget": "mid", "reflect_budget": "low", "recall_sync": True, "recall_prefetch_method": "reflect"},
         client=FakeClient(recall_texts=["fact"], reflect_text="synthesis"),
     )
-    instance.handle_tool_call("hindsight_recall", {"query": "q"})
-    instance.handle_tool_call("hindsight_reflect", {"query": "q"})
+    instance.handle_tool_call("long_term_memory_search", {"query": "q"})
+    instance.handle_tool_call("long_term_memory_reflect", {"query": "q"})
     instance.prefetch("q")
     assert fake.recalls[0]["budget"] == "mid"
     assert [call["budget"] for call in fake.reflects] == ["low", "low"]  # tool and reflect prefetch
@@ -1234,7 +1248,7 @@ def test_reflect_budget_is_set_apart_from_recall(provider):
 def test_an_unset_or_invalid_reflect_budget_follows_recall(provider, reflect_budget):
     config = {"recall_budget": "high"} | ({} if reflect_budget is None else {"reflect_budget": reflect_budget})
     instance, fake = provider(config, client=FakeClient(reflect_text="synthesis"))
-    instance.handle_tool_call("hindsight_reflect", {"query": "q"})
+    instance.handle_tool_call("long_term_memory_reflect", {"query": "q"})
     assert fake.reflects[0]["budget"] == "high"
     instance.shutdown()
 
@@ -1247,7 +1261,7 @@ def test_cron_runs_do_not_auto_recall_but_keep_the_tools(provider):
         cron.queue_prefetch("[IMPORTANT: You are running as a scheduled cron job. ...")
         assert cron.prefetch("[IMPORTANT: You are running as a scheduled cron job. ...") == ""
         assert fake.recalls == []
-        cron.handle_tool_call("hindsight_recall", {"query": "last digest"})
+        cron.handle_tool_call("long_term_memory_search", {"query": "last digest"})
         assert len(fake.recalls) == 1
         cron.shutdown()
 
@@ -1262,10 +1276,10 @@ def test_a_kanban_worker_reads_but_never_writes(provider):
     """#6124: skipping auto-retain alone still let the tool and the built-in memory mirror write
     worker task chatter into the profile's shared bank."""
     worker, fake = provider({"recall_sync": True}, agent_context="kanban", client=FakeClient(recall_texts=["f"]))
-    assert "hindsight_retain" not in {schema["name"] for schema in worker.get_tool_schemas()}
-    assert "hindsight_retain" not in worker.system_prompt_block()
+    assert "long_term_memory_save" not in {schema["name"] for schema in worker.get_tool_schemas()}
+    assert "long_term_memory_save" not in worker.system_prompt_block()
     assert "f" in worker.prefetch("work kanban task t_1")  # it still reads the bank
-    assert "retain_kanban" in worker.handle_tool_call("hindsight_retain", {"content": "task report"})
+    assert "retain_kanban" in worker.handle_tool_call("long_term_memory_save", {"content": "task report"})
     worker.on_memory_write("add", "memory", "a fact from the worker")
     worker.sync_turn("work kanban task t_1", "done")
     worker.shutdown()
@@ -1275,9 +1289,9 @@ def test_a_kanban_worker_reads_but_never_writes(provider):
 def test_retain_kanban_lets_workers_write(provider):
     """#6419: where the dispatcher retains nothing, the workers' runs are the only record."""
     worker, fake = provider({"retain_kanban": True}, agent_context="kanban")
-    assert "hindsight_retain" in {schema["name"] for schema in worker.get_tool_schemas()}
+    assert "long_term_memory_save" in {schema["name"] for schema in worker.get_tool_schemas()}
     worker.sync_turn("work kanban task t_1", "done")
-    worker.handle_tool_call("hindsight_retain", {"content": "task report"})
+    worker.handle_tool_call("long_term_memory_save", {"content": "task report"})
     worker.on_memory_write("add", "memory", "a fact from the worker")
     worker.shutdown()
     assert len(fake.retains) == 3

@@ -82,7 +82,7 @@ def test_a_chat_bank_beats_the_env_bank_and_the_top_level_template(provider):
     config = {"bank_id_template": "hermes-{platform}", "chats": {"telegram/-100123/42": {"bank_id": "home"}}}
     instance, fake = provider(config, **TOPIC)
     assert (instance._bank_id, instance._bank_source) == ("home", "chats['telegram/-100123/42']")
-    instance.handle_tool_call("hindsight_retain", {"content": "the NAS runs TrueNAS"})
+    instance.handle_tool_call("long_term_memory_save", {"content": "the NAS runs TrueNAS"})
     assert [r["bank_id"] for r in fake.retains] == ["home"]
     instance.shutdown()
 
@@ -108,8 +108,8 @@ def test_recall_only_banks_for_one_chat(provider):
     other, other_client = provider(
         config, client=FakeClient(recall_texts=["x"]), platform="telegram", chat_id="-100777"
     )
-    shop.handle_tool_call("hindsight_recall", {"query": "shipping"})
-    other.handle_tool_call("hindsight_recall", {"query": "shipping"})
+    shop.handle_tool_call("long_term_memory_search", {"query": "shipping"})
+    other.handle_tool_call("long_term_memory_search", {"query": "shipping"})
     assert sorted(r["bank_id"] for r in shop_client.recalls) == ["fleet", "peptides"]
     assert [r["bank_id"] for r in other_client.recalls] == ["fleet"]
     assert shop._write_bank_ids == ["fleet"]  # read, never written

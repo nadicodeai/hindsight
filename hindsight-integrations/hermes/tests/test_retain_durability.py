@@ -194,11 +194,11 @@ def test_the_status_line_says_when_saves_fail(provider, monkeypatch):
     instance.sync_turn("fourth", "four")
     instance.shutdown()
 
-    assert [line.split(" — ", 1)[1] for line in lines] == [
-        "saving to memory…",
-        "couldn't save to memory yet, will retry (1 waiting)",
-        "1 earlier save(s) to memory failed and were dropped (see the Hermes log)",
-        "saving to memory…",
+    assert [line.split(" ", 1)[1] for line in lines] == [
+        "Saving to long-term memory…",
+        "Couldn't save to long-term memory yet, will retry (1 waiting)",
+        "1 earlier save(s) to long-term memory failed and were dropped (see the log)",
+        "Saving to long-term memory…",
     ]
 
 

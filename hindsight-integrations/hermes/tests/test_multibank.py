@@ -308,8 +308,9 @@ def test_single_bank_recall_error_reaches_the_tool_as_a_failure():
     provider = _provider_with({"bank_id": "primary"})
     _fake_recall(provider, {"primary": RuntimeError("connection refused")})
 
-    result = provider.handle_tool_call("hindsight_recall", {"query": "q"})
-    assert "Failed to search memory: connection refused" in result
+    result = provider.handle_tool_call("long_term_memory_search", {"query": "q"})
+    assert "Failed to search memory" in result
+    assert "connection refused" not in result
     assert "No relevant memories found" not in result
 
 
@@ -355,7 +356,7 @@ def test_retain_tool_reports_success_when_only_an_extra_bank_fails():
     provider = _provider_with({"bank_id": "primary", "additional_banks": ["broken"]})
     written = _fake_retain(provider, failing={"broken"})
 
-    result = provider.handle_tool_call("hindsight_retain", {"content": "a fact"})
+    result = provider.handle_tool_call("long_term_memory_save", {"content": "a fact"})
 
     assert written == ["primary", "broken"]
     assert "Memory queued for storage" in result  # retain_async defaults on
@@ -365,10 +366,11 @@ def test_retain_tool_reports_failure_when_the_primary_fails():
     provider = _provider_with({"bank_id": "primary", "additional_banks": ["shared"]})
     written = _fake_retain(provider, failing={"primary"})
 
-    result = provider.handle_tool_call("hindsight_retain", {"content": "a fact"})
+    result = provider.handle_tool_call("long_term_memory_save", {"content": "a fact"})
 
     assert written == ["primary"]
-    assert "Failed to store memory: primary unavailable" in result
+    assert "Failed to store memory" in result
+    assert "primary unavailable" not in result
 
 
 def test_mirror_uses_the_nested_bank_id_form_like_the_fallback(tmp_path: Path):
@@ -477,8 +479,8 @@ def test_writes_skip_an_extra_bank_while_it_cools_down():
     provider = _provider_with({"bank_id": "primary", "additional_banks": ["broken", "shared"]})
     written = _fake_retain(provider, failing={"broken"})
 
-    provider.handle_tool_call("hindsight_retain", {"content": "one"})
-    provider.handle_tool_call("hindsight_retain", {"content": "two"})
+    provider.handle_tool_call("long_term_memory_save", {"content": "one"})
+    provider.handle_tool_call("long_term_memory_save", {"content": "two"})
 
     assert written == ["primary", "broken", "shared", "primary", "shared"]
 
@@ -529,7 +531,7 @@ def test_a_failed_recall_does_not_stop_writes_to_the_same_bank():
     provider._recall("q")
     written = _fake_retain(provider, failing=set())
 
-    provider.handle_tool_call("hindsight_retain", {"content": "a fact"})
+    provider.handle_tool_call("long_term_memory_save", {"content": "a fact"})
 
     assert written == ["primary", "team"]
 

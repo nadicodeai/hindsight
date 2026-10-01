@@ -190,7 +190,7 @@ _PREFETCH_JOIN_SECONDS = 3.0
 # "nothing found" (#6482). Fixed text, never the exception: errors can carry hosts and URLs. It is
 # worded so a customer-facing agent need not announce an outage, only not read the gap as fact.
 _RECALL_FAILED_NOTE = (
-    "# Hindsight Memory\n"
+    "# Long-term memory\n"
     "Memory lookup failed this turn, so context from earlier sessions is missing. Don't conclude "
     "the user never told you something just because it is not here."
 )
@@ -476,9 +476,9 @@ def _run_sync(coro, timeout: float = _DEFAULT_TIMEOUT):
 
 
 RETAIN_SCHEMA = {
-    "name": "hindsight_retain",
+    "name": "long_term_memory_save",
     "description": (
-        "Store information to long-term memory. Hindsight automatically "
+        "Store information to long-term memory. It automatically "
         "extracts structured facts, resolves entities, and indexes for retrieval."
     ),
     "parameters": {
@@ -497,7 +497,7 @@ RETAIN_SCHEMA = {
                     "When the remembered event actually happened, as an ISO-8601 date "
                     "or datetime (e.g. '2026-08-20' or '2026-08-20T14:30:00+02:00'). "
                     "Pass this whenever the memory references a specific event time "
-                    "('yesterday', 'last Tuesday', 'on March 3rd') so Hindsight can "
+                    "('yesterday', 'last Tuesday', 'on March 3rd') so the memory can "
                     "anchor it on the timeline. Omit for timeless facts/preferences."
                 ),
             },
@@ -507,7 +507,7 @@ RETAIN_SCHEMA = {
 }
 
 RECALL_SCHEMA = {
-    "name": "hindsight_recall",
+    "name": "long_term_memory_search",
     "description": (
         "Search long-term memory. Returns memories ranked by relevance using "
         "semantic search, keyword matching, entity graph traversal, and reranking."
@@ -520,7 +520,7 @@ RECALL_SCHEMA = {
 }
 
 REFLECT_SCHEMA = {
-    "name": "hindsight_reflect",
+    "name": "long_term_memory_reflect",
     "description": (
         "Synthesize a reasoned answer from long-term memories. Unlike recall, "
         "this reasons across all stored memories to produce a coherent response."
@@ -720,17 +720,17 @@ _PER_CALL_METADATA = frozenset({"retained_at", "message_count", "turn_index"})
 # history question and skipped Hindsight's deduplicated memories.
 _TOOL_GUIDANCE = (
     "For cross-session facts, user preferences, and past decisions, "
-    "prefer hindsight_recall over session_search — it returns "
+    "prefer long_term_memory_search over session_search — it returns "
     "deduplicated, high-density observations across sessions. "
-    "Use hindsight_reflect for cross-session pattern synthesis. "
+    "Use long_term_memory_reflect for cross-session pattern synthesis. "
     "Use session_search only when you need verbatim transcripts or "
     "exact wording from a specific conversation."
 )
 # A wrong memory left alone is served again next session; a stated correction outranks it.
 _RETAIN_GUIDANCE = (
-    " Use hindsight_retain to store facts."
+    " Use long_term_memory_save to store facts."
     " When the user says a memory is wrong or out of date, or you find it is, store the correction"
-    " with hindsight_retain: what memory said, what is true now, and why (e.g. 'User moved from"
+    " with long_term_memory_save: what memory said, what is true now, and why (e.g. 'User moved from"
     " Porto to Lisbon; Porto is no longer their city')."
 )
 _CONTEXT_NOTE = "Relevant memories are automatically injected into context."
@@ -1055,7 +1055,7 @@ class HindsightMemoryProvider(MemoryProvider):
             },
             {
                 "key": "recall_exclude_tags",
-                "description": "Tags to keep out of recall (comma-separated or a list): a memory carrying any of them is skipped by auto-recall and the hindsight_recall tool but stays in the bank; untagged memories are unaffected",
+                "description": "Tags to keep out of recall (comma-separated or a list): a memory carrying any of them is skipped by auto-recall and the long_term_memory_search tool but stays in the bank; untagged memories are unaffected",
                 "default": "",
             },
             {
@@ -1071,12 +1071,12 @@ class HindsightMemoryProvider(MemoryProvider):
             },
             {
                 "key": "recall_types",
-                "description": "Fact types to surface on recall — applies to both auto-recall and the hindsight_recall tool (comma-separated or list). Defaults to observation-only — observations are Hindsight's consolidated, deduplicated, evidence-grounded knowledge layer; raw world/experience facts are the supporting evidence observations already summarize. Set to e.g. 'observation,world,experience' to also include raw facts.",
+                "description": "Fact types to surface on recall — applies to both auto-recall and the long_term_memory_search tool (comma-separated or list). Defaults to observation-only — observations are Hindsight's consolidated, deduplicated, evidence-grounded knowledge layer; raw world/experience facts are the supporting evidence observations already summarize. Set to e.g. 'observation,world,experience' to also include raw facts.",
                 "default": "observation",
             },
             {
                 "key": "recall_min_scores",
-                "description": 'Minimum relevance per score field, as a JSON object (e.g. {"reranker": 0.25}). Recall always returns up to recall_max_tokens of the best-ranked memories even when none is relevant; memories under a floor are dropped from auto-recall and the hindsight_recall tool, so an off-topic turn injects nothing. Default: no floor',
+                "description": 'Minimum relevance per score field, as a JSON object (e.g. {"reranker": 0.25}). Recall always returns up to recall_max_tokens of the best-ranked memories even when none is relevant; memories under a floor are dropped from auto-recall and the long_term_memory_search tool, so an off-topic turn injects nothing. Default: no floor',
                 "default": "",
             },
             {"key": "auto_recall", "description": "Automatically recall memories before each turn", "default": True},
@@ -1087,12 +1087,12 @@ class HindsightMemoryProvider(MemoryProvider):
             },
             {
                 "key": "recall_indicator",
-                "description": "Show a '💭 Hindsight — recalled N memories' status line when auto-recall injects memory (turn off for customer-facing agents)",
+                "description": "Show a '💭 Long-term memory — recalled N memories' status line when auto-recall injects memory (turn off for customer-facing agents)",
                 "default": True,
             },
             {
                 "key": "retain_indicator",
-                "description": "Show a '💭 Hindsight — saving to memory…' status line when a turn is saved to memory (turn off for customer-facing agents)",
+                "description": "Show a '💭 Saving to long-term memory…' status line when a turn is saved to memory (turn off for customer-facing agents)",
                 "default": True,
             },
             {"key": "auto_retain", "description": "Automatically retain conversation turns", "default": True},
@@ -2053,7 +2053,7 @@ class HindsightMemoryProvider(MemoryProvider):
             tail += _PAGE_GUIDANCE
         if self._writes_disabled:  # the retain tool is not offered to a read-only kanban worker
             tail = tail.replace(_RETAIN_GUIDANCE, "")
-        block = f"# Hindsight Memory\nActive{label}. Bank: {self._bank_id}, budget: {self._budget}.\n{tail}"
+        block = f"# Long-term memory\nActive{label}.\n{tail}"
         if self._session_context_block is None:
             self._session_context_block = self._load_session_context()
         return f"{block}\n\n{self._session_context_block}" if self._session_context_block else block
@@ -2095,7 +2095,7 @@ class HindsightMemoryProvider(MemoryProvider):
             sections.append(f"## {name}\n{content.strip()}")
         if not sections:
             return ""
-        return "# Hindsight Session Context\nBackground from memory, read at session start.\n\n" + "\n\n".join(sections)
+        return "# Background from long-term memory\nRead at session start.\n\n" + "\n\n".join(sections)
 
     # -- recall ------------------------------------------------------------------
 
@@ -2239,7 +2239,7 @@ class HindsightMemoryProvider(MemoryProvider):
             return ""
         logger.debug("Prefetch: returning %d chars of context", len(result))
         header = self._recall_prompt_preamble or (
-            "# Hindsight Memory (persistent cross-session context)\n"
+            "# Long-term memory (persistent cross-session context)\n"
             "Use this to answer questions about the user and prior sessions. "
             "Do not call tools to look up information that is already present here."
         )
@@ -2277,7 +2277,7 @@ class HindsightMemoryProvider(MemoryProvider):
         """Count injected by the last prefetch; None if nothing injected or ``recall_indicator=false``."""
         if not self._recall_indicator or not self._last_recall_returned:
             return None
-        return RecallStatus(provider_label="Hindsight", count=self._last_recall_count, glyph=_HINDSIGHT_GLYPH)
+        return RecallStatus(provider_label="Long-term memory", count=self._last_recall_count, glyph=_HINDSIGHT_GLYPH)
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
         # Sync mode recalls live each turn — nothing to prime in the background.
@@ -2546,7 +2546,7 @@ class HindsightMemoryProvider(MemoryProvider):
         # Model-independent status line; no-op without retain_indicator/status channel.
         if self._retain_indicator and self._status_callback is not None:
             try:
-                self._status_callback(f"{_HINDSIGHT_GLYPH} Hindsight — {self._retain_status()}")
+                self._status_callback(f"{_HINDSIGHT_GLYPH} {self._retain_status()}")
             except Exception:
                 logger.debug("Retain indicator emit failed (non-fatal)", exc_info=True)
         self._enqueue_retain(job)
@@ -2599,12 +2599,12 @@ class HindsightMemoryProvider(MemoryProvider):
         turn path only; the writer thread only ever increments ``_retains_dropped``."""
         if (dropped := self._retains_dropped - self._retains_dropped_shown) > 0:
             self._retains_dropped_shown += dropped
-            return f"{dropped} earlier save(s) to memory failed and were dropped (see the Hermes log)"
+            return f"{dropped} earlier save(s) to long-term memory failed and were dropped (see the log)"
         with self._retain_backlog_lock:  # the writer pops from it
             waiting = sum(1 for entry in self._retain_backlog if entry.failures)
         if waiting:
-            return f"couldn't save to memory yet, will retry ({waiting} waiting)"
-        return "saving to memory…"
+            return f"Couldn't save to long-term memory yet, will retry ({waiting} waiting)"
+        return "Saving to long-term memory…"
 
     def _enqueue_retain(self, retain: _PendingRetain) -> None:
         """Hand *retain* to the (lazily started) writer and arm the atexit drain."""
@@ -2632,11 +2632,11 @@ class HindsightMemoryProvider(MemoryProvider):
         Recall and the page reads: retain and page creation write to the bank, and reflect may
         consolidate server-side. Hermes intersects this with :meth:`get_tool_schemas`, so ``context``
         mode exposes none."""
-        return ["hindsight_recall", "hindsight_search_pages", "hindsight_read_page", "hindsight_list_pages"]
+        return ["long_term_memory_search", "hindsight_search_pages", "hindsight_read_page", "hindsight_list_pages"]
 
     def _tool_retain(self, args: dict) -> str:
         if self._writes_disabled:
-            return "hindsight_retain is disabled for kanban workers; set retain_kanban to allow it."
+            return "long_term_memory_save is disabled for kanban workers; set retain_kanban to allow it."
         content, context = args["content"], args.get("context")
         item = self._build_retain_kwargs(
             content, context=context, tags=args.get("tags"), occurred_at=args.get("occurred_at")
@@ -2644,7 +2644,7 @@ class HindsightMemoryProvider(MemoryProvider):
 
         def _write(bank_id: str) -> None:
             logger.debug(
-                "Tool hindsight_retain: bank=%s, content_len=%d, context=%s",
+                "Tool long_term_memory_save: bank=%s, content_len=%d, context=%s",
                 bank_id,
                 len(content),
                 context,
@@ -2654,15 +2654,15 @@ class HindsightMemoryProvider(MemoryProvider):
                 self._track_retain_ops(resp, bank_id)
 
         self._write_to_banks(list(self._write_bank_ids), _write)
-        logger.debug("Tool hindsight_retain: success")
+        logger.debug("Tool long_term_memory_save: success")
         # An async retain is only accepted here; the memory is searchable once the server processes it.
         return "Memory queued for storage." if self._retain_async else "Memory stored successfully."
 
     def _tool_recall(self, args: dict) -> str:
         query = args["query"]
-        logger.debug("Tool hindsight_recall: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._budget)
+        logger.debug("Tool long_term_memory_search: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._budget)
         results = self._recall(query)
-        logger.debug("Tool hindsight_recall: %d results", len(results))
+        logger.debug("Tool long_term_memory_search: %d results", len(results))
         tz = _hermes_now().tzinfo
         return (
             "\n".join(f"{i}. {_format_memory(r, tz)}" for i, r in enumerate(results, 1))
@@ -2672,10 +2672,10 @@ class HindsightMemoryProvider(MemoryProvider):
     def _tool_reflect(self, args: dict) -> str:
         query = args["query"]
         logger.debug(
-            "Tool hindsight_reflect: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._reflect_budget
+            "Tool long_term_memory_reflect: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._reflect_budget
         )
         text = self._reflect(query) or ""
-        logger.debug("Tool hindsight_reflect: response_len=%d", len(text))
+        logger.debug("Tool long_term_memory_reflect: response_len=%d", len(text))
         return text or "No relevant memories found."
 
     def _tool_search_pages(self, args: dict) -> str:
@@ -2741,9 +2741,9 @@ class HindsightMemoryProvider(MemoryProvider):
 
     # tool name -> (required args, handler, user-facing failure prefix)
     _TOOL_HANDLERS = {
-        "hindsight_retain": (("content",), _tool_retain, "Failed to store memory"),
-        "hindsight_recall": (("query",), _tool_recall, "Failed to search memory"),
-        "hindsight_reflect": (("query",), _tool_reflect, "Failed to reflect"),
+        "long_term_memory_save": (("content",), _tool_retain, "Failed to store memory"),
+        "long_term_memory_search": (("query",), _tool_recall, "Failed to search memory"),
+        "long_term_memory_reflect": (("query",), _tool_reflect, "Failed to reflect"),
         "hindsight_search_pages": (("query",), _tool_search_pages, "Failed to search pages"),
         "hindsight_read_page": (("page_id",), _tool_read_page, "Failed to read page"),
         "hindsight_list_pages": ((), _tool_list_pages, "Failed to list pages"),
@@ -2762,7 +2762,7 @@ class HindsightMemoryProvider(MemoryProvider):
             return json.dumps({"result": handler(self, args)}, ensure_ascii=False)
         except Exception as e:
             logger.warning("%s failed: %s", tool_name, e, exc_info=True)
-            return tool_error(f"{failure}: {_api_error_detail(e)}")
+            return tool_error(failure)
 
     # -- session lifecycle -------------------------------------------------------
 
@@ -2903,7 +2903,7 @@ class HindsightMemoryProvider(MemoryProvider):
         except OSError as exc:
             logger.warning("Hindsight could not save %d unsent retain(s), they are lost: %s", len(unsent), exc)
             return
-        msg = f"Hindsight: {len(unsent)} memory save(s) not sent yet, will send them next time."
+        msg = f"Long-term memory: {len(unsent)} save(s) not sent yet, will send them next time."
         logger.warning("%s (%s)", msg, path)
         if self._warning_callback is not None:
             with contextlib.suppress(Exception):

@@ -333,27 +333,27 @@ recalls everything in a chat without topics. Values are used as they are, not cl
 | Key | Default | Description |
 |-----|---------|-------------|
 | `recall_budget` | `mid` | Recall thoroughness: `low` / `mid` / `high` |
-| `reflect_budget` | same as `recall_budget` | Reflect thoroughness for the `hindsight_reflect` tool and `recall_prefetch_method: reflect`: `low` / `mid` / `high`. Keep it `low` on a large bank where a `mid` reflect runs past the server's timeout, while recall stays `mid`. |
+| `reflect_budget` | same as `recall_budget` | Reflect thoroughness for the `long_term_memory_reflect` tool and `recall_prefetch_method: reflect`: `low` / `mid` / `high`. Keep it `low` on a large bank where a `mid` reflect runs past the server's timeout, while recall stays `mid`. |
 | `recall_prefetch_method` | `recall` | Auto-recall method: `recall` (raw facts) or `reflect` (LLM synthesis) |
 | `recall_max_tokens` | `4096` | Maximum tokens for recall results |
 | `recall_max_tokens_mode` | `per_bank` | With several recall banks: `per_bank` gives each bank the full `recall_max_tokens`; `split` divides it evenly across the banks searched, so the total stays under it |
 | `recall_max_input_chars` | `800` | Maximum input query length for auto-recall |
 | `recall_prompt_preamble` | — | Custom preamble for recalled memories in context |
-| `recall_query_strip_patterns` | — | Regexes, one per line (or a JSON list): lines of the incoming message that match any of them are removed from the auto-recall query before `recall_max_input_chars` is applied. Use it for boilerplate that repeats on every message, such as a provenance header, which would otherwise fill the query and make recall find nothing. If every line matches, the full message is used. The message the model sees is unchanged, and the `hindsight_recall` tool is not affected. |
+| `recall_query_strip_patterns` | — | Regexes, one per line (or a JSON list): lines of the incoming message that match any of them are removed from the auto-recall query before `recall_max_input_chars` is applied. Use it for boilerplate that repeats on every message, such as a provenance header, which would otherwise fill the query and make recall find nothing. If every line matches, the full message is used. The message the model sees is unchanged, and the `long_term_memory_search` tool is not affected. |
 | `session_context` | — | Mental models and pages to add to the system prompt when a session starts, in the order listed: a JSON list or comma-separated text of `mental_model:<id>` or `page:<id>` (a bare id is a mental model). Each is read once per session (no LLM call, 5 s limit) and stays the same for the whole session, so prompt caching keeps working; an update shows up in the next session. One that cannot be read is skipped with a warning. In `local_embedded` mode it is skipped when the local daemon is not running yet. |
 | `recall_tags` | — | Tags to filter when searching memories: a JSON list (e.g. `["project-x", "team"]`) or comma-separated text (`"project-x, team"`). Accepts the [tag placeholders](#tag-placeholders). |
 | `recall_tags_match` | `any` | Tag matching mode: `any` / `all` / `any_strict` / `all_strict` |
-| `recall_exclude_tags` | — | Tags to keep out of recall (auto-recall and the `hindsight_recall` tool), as a JSON list or comma-separated text (e.g. `"draft, scratch"`). A memory carrying any of them is skipped but stays in the bank; untagged memories and other tags are unaffected. Combines with `recall_tags`; does not apply to reflect. Accepts the [tag placeholders](#tag-placeholders). |
-| `reflect_tags` | — | Tags that scope what reflect reasons over (the `hindsight_reflect` tool and `recall_prefetch_method: reflect`), as a JSON list or comma-separated text. Unset, reflect uses the whole bank; `recall_tags` does not apply to reflect. Accepts the [tag placeholders](#tag-placeholders). |
+| `recall_exclude_tags` | — | Tags to keep out of recall (auto-recall and the `long_term_memory_search` tool), as a JSON list or comma-separated text (e.g. `"draft, scratch"`). A memory carrying any of them is skipped but stays in the bank; untagged memories and other tags are unaffected. Combines with `recall_tags`; does not apply to reflect. Accepts the [tag placeholders](#tag-placeholders). |
+| `reflect_tags` | — | Tags that scope what reflect reasons over (the `long_term_memory_reflect` tool and `recall_prefetch_method: reflect`), as a JSON list or comma-separated text. Unset, reflect uses the whole bank; `recall_tags` does not apply to reflect. Accepts the [tag placeholders](#tag-placeholders). |
 | `reflect_tags_match` | `any` | Tag matching mode for `reflect_tags` |
-| `recall_types` | `observation` | Fact types surfaced by recall (both auto-recall and the `hindsight_recall` tool). Comma-separated string or JSON list. **Default narrowed to `observation` only** (see "Behavior change" below). Set to `observation,world,experience` to also include raw facts. |
-| `recall_min_scores` | — | Minimum relevance per score field, as a JSON object (e.g. `{"reranker": 0.25}` or `{"semantic": 0.5}`). Applies to both auto-recall and the `hindsight_recall` tool. See the tip below. |
+| `recall_types` | `observation` | Fact types surfaced by recall (both auto-recall and the `long_term_memory_search` tool). Comma-separated string or JSON list. **Default narrowed to `observation` only** (see "Behavior change" below). Set to `observation,world,experience` to also include raw facts. |
+| `recall_min_scores` | — | Minimum relevance per score field, as a JSON object (e.g. `{"reranker": 0.25}` or `{"semantic": 0.5}`). Applies to both auto-recall and the `long_term_memory_search` tool. See the tip below. |
 | `auto_recall` | `true` | Automatically recall memories before each turn |
-| `recall_cron` | `false` | Also auto-recall in scheduled (cron) runs. Off by default: Hermes starts every cron prompt with a fixed notice longer than `recall_max_input_chars`, so the recall would search for that notice instead of the job and inject unrelated memories. The `hindsight_recall` and `hindsight_reflect` tools still work in cron runs. |
+| `recall_cron` | `false` | Also auto-recall in scheduled (cron) runs. Off by default: Hermes starts every cron prompt with a fixed notice longer than `recall_max_input_chars`, so the recall would search for that notice instead of the job and inject unrelated memories. The `long_term_memory_search` and `long_term_memory_reflect` tools still work in cron runs. |
 | `recall_sync` | `false` | Recall synchronously against the *current* message each turn (higher relevance, adds recall latency). Default off: recall runs in the background and is injected on the next turn. The first message of a session starts its own recall and waits up to 3s for it, since nothing ran before it; a slower server leaves that message without memory and injects the result on the next turn. |
-| `recall_indicator` | `true` | Show a `💭 Hindsight — recalled N memories` status line when auto-recall injects memory. Turn off for customer-facing agents. |
+| `recall_indicator` | `true` | Show a `💭 Long-term memory — recalled N memories` status line when auto-recall injects memory. Turn off for customer-facing agents. |
 
-Each recalled memory, in auto-recall and in the `hindsight_recall` tool, carries its dates so the model can tell an old fact from a fresh one: `- <text> (mentioned: 2026-10-18) [occurred: 2026-09-01 → 2026-09-03]`. `mentioned` is when the fact was stated, `occurred` is when the event itself happened. Dates are shown in Hermes' configured timezone; a memory without a date shows none.
+Each recalled memory, in auto-recall and in the `long_term_memory_search` tool, carries its dates so the model can tell an old fact from a fresh one: `- <text> (mentioned: 2026-10-18) [occurred: 2026-09-01 → 2026-09-03]`. `mentioned` is when the fact was stated, `occurred` is when the event itself happened. Dates are shown in Hermes' configured timezone; a memory without a date shows none.
 
 > **Behavior change — `recall_types` defaults to `observation` only.**
 >
@@ -361,7 +361,7 @@ Each recalled memory, in auto-recall and in the `hindsight_recall` tool, carries
 >
 > Per [Hindsight's docs](https://hindsight.vectorize.io/developer/observations), observations are the **consolidated** knowledge layer Hindsight builds on top of raw facts: deduplicated beliefs grounded in evidence, refined as new facts arrive, with proof counts and freshness signals. Raw `world` / `experience` facts are the individual supporting evidence that feeds them. For per-turn context injection, observations are denser per token and avoid feeding the model multiple raw facts that one observation already summarizes.
 >
-> Restore the broad recall with `"recall_types": "observation,world,experience"` (string or JSON list) in `~/.hermes/hindsight/config.json`. This applies to **both** auto-recall and the `hindsight_recall` tool — both read the same `recall_types` setting (the tool schema has no per-call `types` argument), so narrowing the default narrows both paths.
+> Restore the broad recall with `"recall_types": "observation,world,experience"` (string or JSON list) in `~/.hermes/hindsight/config.json`. This applies to **both** auto-recall and the `long_term_memory_search` tool — both read the same `recall_types` setting (the tool schema has no per-call `types` argument), so narrowing the default narrows both paths.
 
 > **Tip — `recall_min_scores` against off-topic recall.** Recall ranks, it does not judge relevance: a question
 > unrelated to anything stored still comes back with up to `recall_max_tokens` of the least-bad memories. The
@@ -390,9 +390,9 @@ Renaming, moving and deleting pages are left to the Hindsight UI.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `auto_retain` | `true` | Automatically retain conversation turns. Sub-agent (`delegate_task`) runs are never auto-retained, and kanban workers only with `retain_kanban`; their parent session keeps its own turns. |
-| `retain_cron` | `false` | Also auto-retain scheduled (cron) runs. Off by default, so job output stays out of the user's memory; the `hindsight_retain` tool still works in cron runs. |
-| `retain_kanban` | `false` | Let kanban workers write to memory: auto-retain of their turns, the `hindsight_retain` tool and the copy of built-in memory writes. Off by default, so a worker recalls and reflects on its profile's bank but never writes to it. Turn it on when the workers' runs are the only record of their work. |
-| `mirror_builtin_memory` | `true` | Copy built-in memory writes (`MEMORY.md`, `USER.md` adds and replaces) into the bank, tagged `builtin-memory`. Turn it off to keep those notes out of a curated bank; the `hindsight_retain` tool and auto-retain are not affected. |
+| `retain_cron` | `false` | Also auto-retain scheduled (cron) runs. Off by default, so job output stays out of the user's memory; the `long_term_memory_save` tool still works in cron runs. |
+| `retain_kanban` | `false` | Let kanban workers write to memory: auto-retain of their turns, the `long_term_memory_save` tool and the copy of built-in memory writes. Off by default, so a worker recalls and reflects on its profile's bank but never writes to it. Turn it on when the workers' runs are the only record of their work. |
+| `mirror_builtin_memory` | `true` | Copy built-in memory writes (`MEMORY.md`, `USER.md` adds and replaces) into the bank, tagged `builtin-memory`. Turn it off to keep those notes out of a curated bank; the `long_term_memory_save` tool and auto-retain are not affected. |
 | `retain_async` | `true` | Process retain asynchronously on the Hindsight server |
 | `retain_every_n_turns` | `1` | Retain every N turns (1 = every turn) |
 | `retain_context` | `conversation between Hermes Agent and the User` | Context label for retained memories. A sentence saying that what a tool fetched belongs to its source, not to the User or the agent, is always added after it |
@@ -400,7 +400,7 @@ Renaming, moving and deleting pages are left to the Hindsight UI.
 | `observation_scopes` | `shared` | How observations are grouped by tag during consolidation: `shared` (one scope for the whole bank, so observations merge across sessions; the `session:`/`parent:` tags stay on the facts for filtering), `combined` (one scope per exact tag set, which here means one per session), `per_tag` (one pass per tag), `all_combinations` (every tag subset, expensive), or a JSON list of tag lists for custom scopes (e.g. `[["user:alice"], ["project-x"]]`). |
 | `retain_source` | — | Opt-in `metadata.source` attached to retained memories (identifies the storing client, e.g. `hermes`). Empty by default — no attribution tag ships unless you set it. |
 | `retain_strategy` | — | Named retain strategy sent with every stored item (`HINDSIGHT_RETAIN_STRATEGY`). The bank must define it under `retain_strategies`; an unknown name is ignored by the server. Empty lets the bank decide. |
-| `retain_indicator` | `true` | Show a `💭 Hindsight — saving to memory…` status line when a turn is saved (or that earlier saves failed, so a broken save path is not silent). Turn off for customer-facing agents. |
+| `retain_indicator` | `true` | Show a `💭 Saving to long-term memory…` status line when a turn is saved (or that earlier saves failed, so a broken save path is not silent). Turn off for customer-facing agents. |
 | `retain_user_prefix` | `User` | Label used before user turns in auto-retained transcripts. A turn Hermes marks as written by another agent gets that agent's name as its role and label instead (`Bot` when it has none) |
 | `retain_assistant_prefix` | `Assistant` | Label used before assistant turns in auto-retained transcripts. The tools the agent called that turn go just before it, as one `Tool call: name(args)` line each (arguments cut short, output never sent), so a reply that summarises a page or video is not stored as the agent's or the user's own experience |
 | `prefetch_waits_for_retain` | `true` | Before the background recall for the next turn, wait until the turn just saved can be found, so recall includes it. Runs off the reply path and adds no response time. |
@@ -457,16 +457,16 @@ Available in `hybrid` and `tools` memory modes:
 
 | Tool | Description |
 |------|-------------|
-| `hindsight_retain` | Store information with auto entity extraction; supports optional per-call `tags` |
-| `hindsight_recall` | Multi-strategy search (semantic + entity graph) |
-| `hindsight_reflect` | Cross-memory synthesis (LLM-powered) |
+| `long_term_memory_save` | Store information with auto entity extraction; supports optional per-call `tags` |
+| `long_term_memory_search` | Multi-strategy search (semantic + entity graph) |
+| `long_term_memory_reflect` | Cross-memory synthesis (LLM-powered) |
 | `hindsight_search_pages` | Find pages about a topic: one line per page with name, id and opening text (`page_tools`) |
 | `hindsight_read_page` | Read one page in full (`page_tools`) |
 | `hindsight_list_pages` | Every page and folder by name and id (`page_tools`) |
 | `hindsight_create_page` | Create a page from a name and a question, only when the user asks (`page_create_tool`, off by default) |
 
 The model is told to fix wrong memories: when the user says a memory is wrong or out of date, or the
-model finds one is, it stores the correction with `hindsight_retain` (what memory said, what is true
+model finds one is, it stores the correction with `long_term_memory_save` (what memory said, what is true
 now, and why). The newer fact then replaces the old one when Hindsight rebuilds its observations.
 
 ## Environment Variables
@@ -501,7 +501,7 @@ These are used **only when there is no config file at all**. Once `hermes memory
 | `HINDSIGHT_BUDGET` | Recall budget (`recall_budget`) |
 | `HINDSIGHT_REFLECT_BUDGET` | Reflect budget (`reflect_budget`) |
 | `HINDSIGHT_RETAIN_CONTEXT` | Label stored with each retained conversation (`retain_context`) |
-| `HINDSIGHT_RETAIN_INDICATOR` | `false` hides the "saving to memory" status line (`retain_indicator`) |
+| `HINDSIGHT_RETAIN_INDICATOR` | `false` hides the "Saving to long-term memory" status line (`retain_indicator`) |
 | `HINDSIGHT_RECALL_INDICATOR` | `false` hides the "recalled N memories" status line (`recall_indicator`) |
 | `HINDSIGHT_RECALL_SYNC` | `true` recalls against the current message before answering (`recall_sync`) |
 
@@ -522,7 +522,7 @@ The provider works across every gateway platform. Hermes builds a fresh agent pe
 provider is re-initialized with it, so auto-recall runs for each turn regardless of platform.
 
 Two settings are worth turning off for customer-facing bots: `recall_indicator` and
-`retain_indicator`, which otherwise print a `💭 Hindsight` status line into the user's channel.
+`retain_indicator`, which otherwise print a `💭` long-term memory status line into the user's channel.
 
 To use different settings in different chats, topics or platforms, see [Per-chat settings](#per-chat-settings--chats).
 

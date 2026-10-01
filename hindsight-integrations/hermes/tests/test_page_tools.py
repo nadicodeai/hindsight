@@ -176,7 +176,7 @@ def test_missing_args_and_server_detail(provider):
     client.aget_page = not_found
     instance, _ = provider({"page_create_tool": True}, client=client)
     assert "Missing required parameter: question" in _call(instance, "hindsight_create_page", name="X")
-    assert _call(instance, "hindsight_read_page", page_id="nope") == "ERROR: Failed to read page: Page not found"
+    assert _call(instance, "hindsight_read_page", page_id="nope") == "ERROR: Failed to read page"
 
 
 def plugin_api_error(status: int, body: str) -> Exception:
