@@ -73,8 +73,8 @@ from .settings import (
     _project_name,
     _repository_root,
     _resolve_bank_id_template,
-    _template_fields,
     _sanitize_bank_segment,
+    _template_fields,
 )
 
 logger = logging.getLogger(__name__)
@@ -316,7 +316,7 @@ def _run_sync(coro, timeout: float = _DEFAULT_TIMEOUT):
 RETAIN_SCHEMA = {
     "name": "long_term_memory_save",
     "description": (
-        "Store information to long-term memory. It automatically "
+        "Store information in Nadia long-term memory. It automatically "
         "extracts structured facts, resolves entities, and indexes for retrieval."
     ),
     "parameters": {
@@ -372,7 +372,7 @@ def _with_property(schema: dict, name: str, prop: dict) -> dict:
 RECALL_SCHEMA = {
     "name": "long_term_memory_search",
     "description": (
-        "Search long-term memory. Returns memories ranked by relevance using "
+        "Search Nadia long-term memory. Returns memories ranked by relevance using "
         "semantic search, keyword matching, entity graph traversal, and reranking."
     ),
     "parameters": {
@@ -385,7 +385,7 @@ RECALL_SCHEMA = {
 REFLECT_SCHEMA = {
     "name": "long_term_memory_reflect",
     "description": (
-        "Synthesize a reasoned answer from long-term memories. Unlike recall, "
+        "Synthesize a reasoned answer from Nadia long-term memory. Unlike recall, "
         "this reasons across all stored memories to produce a coherent response."
     ),
     "parameters": {
@@ -822,12 +822,12 @@ class HindsightMemoryProvider(MemoryProvider):
             },
             {
                 "key": "recall_indicator",
-                "description": "Show a '👁️ Long-term memory — recalled N memories' status line when auto-recall injects memory (turn off for customer-facing agents)",
+                "description": "Show a '👁️ Nadia long-term memory — recalled N memories' status line when auto-recall injects memory (turn off for customer-facing agents)",
                 "default": True,
             },
             {
                 "key": "retain_indicator",
-                "description": "Show a '👁️ Saving to long-term memory…' status line when a turn is saved to memory (turn off for customer-facing agents)",
+                "description": "Show a '👁️ Saving to Nadia long-term memory…' status line when a turn is saved to memory (turn off for customer-facing agents)",
                 "default": True,
             },
             {"key": "auto_retain", "description": "Automatically retain conversation turns", "default": True},
@@ -1362,9 +1362,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._bank_id = _person_bank(self._person)
         self._write_bank_ids = [self._bank_id]
         self._read_banks = [self._bank_id] + ([TEAM_BANK, PUBLIC_BANK] if self._inside else [PUBLIC_BANK])
-        logger.info(
-            "Memory: person=%s inside=%s reads=%s", self._person, self._inside, ",".join(self._read_banks)
-        )
+        logger.info("Memory: person=%s inside=%s reads=%s", self._person, self._inside, ",".join(self._read_banks))
 
     def _bank_label(self, bank: str) -> str:
         return _BANK_LABELS.get(bank) or ("this person's own memory" if bank == self._bank_id else f"the memory {bank}")
@@ -1603,7 +1601,7 @@ class HindsightMemoryProvider(MemoryProvider):
         label = "" if mode == "hybrid" else f" ({mode} mode)"
         # With auto_recall off nothing is injected, so hybrid must not promise injected context.
         tail = _TOOL_GUIDANCE if mode == "hybrid" and not self._auto_recall else _SYSTEM_PROMPT_TAILS[mode]
-        return f"# Long-term memory\nActive{label}.\n{tail}"
+        return f"# Nadia long-term memory\nActive{label}.\n{tail}"
 
     # -- recall ------------------------------------------------------------------
 
@@ -1636,7 +1634,9 @@ class HindsightMemoryProvider(MemoryProvider):
         """
         bank_ids = [
             bank_id
-            for i, bank_id in enumerate(banks or (self._read_banks if getattr(self, "_audience", False) else self._build_recall_bank_ids()))
+            for i, bank_id in enumerate(
+                banks or (self._read_banks if getattr(self, "_audience", False) else self._build_recall_bank_ids())
+            )
             if i == 0 or self._extra_bank_available("recall", bank_id)
         ]
         kwargs: dict = {"query": query, "budget": self._budget, "max_tokens": self._recall_max_tokens}
@@ -1737,7 +1737,7 @@ class HindsightMemoryProvider(MemoryProvider):
             return ""
         logger.debug("Prefetch: returning %d chars of context", len(result))
         header = self._recall_prompt_preamble or (
-            "# Long-term memory (persistent cross-session context)\n"
+            "# Nadia long-term memory (persistent cross-session context)\n"
             "Use this to answer questions about the user and prior sessions. "
             "Do not call tools to look up information that is already present here."
         )
@@ -1767,7 +1767,9 @@ class HindsightMemoryProvider(MemoryProvider):
         """Count injected by the last prefetch; None if nothing injected or ``recall_indicator=false``."""
         if not self._recall_indicator or not self._last_recall_returned:
             return None
-        return RecallStatus(provider_label="Long-term memory", count=self._last_recall_count, glyph=_HINDSIGHT_GLYPH)
+        return RecallStatus(
+            provider_label="Nadia long-term memory", count=self._last_recall_count, glyph=_HINDSIGHT_GLYPH
+        )
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
         # Sync mode recalls live each turn — nothing to prime in the background.
@@ -1959,7 +1961,7 @@ class HindsightMemoryProvider(MemoryProvider):
         # Model-independent status line; no-op without retain_indicator/status channel.
         if self._retain_indicator and self._status_callback is not None:
             try:
-                self._status_callback(f"{_HINDSIGHT_GLYPH} Saving to long-term memory…")
+                self._status_callback(f"{_HINDSIGHT_GLYPH} Saving to Nadia long-term memory…")
             except Exception:
                 logger.debug("Retain indicator emit failed (non-fatal)", exc_info=True)
         self._enqueue_retain(job)
@@ -2007,8 +2009,11 @@ class HindsightMemoryProvider(MemoryProvider):
             return []
         if not getattr(self, "_audience", False):
             return [RETAIN_SCHEMA, RECALL_SCHEMA, REFLECT_SCHEMA]
-        return [_with_property(RETAIN_SCHEMA, "for", _FOR_PROPERTY),
-                _with_property(RECALL_SCHEMA, "client", _CLIENT_PROPERTY), REFLECT_SCHEMA]
+        return [
+            _with_property(RETAIN_SCHEMA, "for", _FOR_PROPERTY),
+            _with_property(RECALL_SCHEMA, "client", _CLIENT_PROPERTY),
+            REFLECT_SCHEMA,
+        ]
 
     def _tool_retain(self, args: dict) -> str:
         content, context = args["content"], args.get("context")
