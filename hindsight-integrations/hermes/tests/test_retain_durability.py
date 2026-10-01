@@ -195,10 +195,10 @@ def test_the_status_line_says_when_saves_fail(provider, monkeypatch):
     instance.shutdown()
 
     assert [line.split(" ", 1)[1] for line in lines] == [
-        "Saving to long-term memory…",
-        "Couldn't save to long-term memory yet, will retry (1 waiting)",
-        "1 earlier save(s) to long-term memory failed and were dropped (see the log)",
-        "Saving to long-term memory…",
+        "Saving to Nadia long-term memory…",
+        "Couldn't save to Nadia long-term memory yet, will retry (1 waiting)",
+        "1 earlier save(s) to Nadia long-term memory failed and were dropped (see the log)",
+        "Saving to Nadia long-term memory…",
     ]
 
 

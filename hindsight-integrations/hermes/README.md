@@ -351,7 +351,7 @@ recalls everything in a chat without topics. Values are used as they are, not cl
 | `auto_recall` | `true` | Automatically recall memories before each turn |
 | `recall_cron` | `false` | Also auto-recall in scheduled (cron) runs. Off by default: Hermes starts every cron prompt with a fixed notice longer than `recall_max_input_chars`, so the recall would search for that notice instead of the job and inject unrelated memories. The `long_term_memory_search` and `long_term_memory_reflect` tools still work in cron runs. |
 | `recall_sync` | `false` | Recall synchronously against the *current* message each turn (higher relevance, adds recall latency). Default off: recall runs in the background and is injected on the next turn. The first message of a session starts its own recall and waits up to 3s for it, since nothing ran before it; a slower server leaves that message without memory and injects the result on the next turn. |
-| `recall_indicator` | `true` | Show a `💭 Long-term memory — recalled N memories` status line when auto-recall injects memory. Turn off for customer-facing agents. |
+| `recall_indicator` | `true` | Show a `💭 Nadia long-term memory — recalled N memories` status line when auto-recall injects memory. Turn off for customer-facing agents. |
 
 Each recalled memory, in auto-recall and in the `long_term_memory_search` tool, carries its dates so the model can tell an old fact from a fresh one: `- <text> (mentioned: 2026-10-18) [occurred: 2026-09-01 → 2026-09-03]`. `mentioned` is when the fact was stated, `occurred` is when the event itself happened. Dates are shown in Hermes' configured timezone; a memory without a date shows none.
 
@@ -400,7 +400,7 @@ Renaming, moving and deleting pages are left to the Hindsight UI.
 | `observation_scopes` | `shared` | How observations are grouped by tag during consolidation: `shared` (one scope for the whole bank, so observations merge across sessions; the `session:`/`parent:` tags stay on the facts for filtering), `combined` (one scope per exact tag set, which here means one per session), `per_tag` (one pass per tag), `all_combinations` (every tag subset, expensive), or a JSON list of tag lists for custom scopes (e.g. `[["user:alice"], ["project-x"]]`). |
 | `retain_source` | — | Opt-in `metadata.source` attached to retained memories (identifies the storing client, e.g. `hermes`). Empty by default — no attribution tag ships unless you set it. |
 | `retain_strategy` | — | Named retain strategy sent with every stored item (`HINDSIGHT_RETAIN_STRATEGY`). The bank must define it under `retain_strategies`; an unknown name is ignored by the server. Empty lets the bank decide. |
-| `retain_indicator` | `true` | Show a `💭 Saving to long-term memory…` status line when a turn is saved (or that earlier saves failed, so a broken save path is not silent). Turn off for customer-facing agents. |
+| `retain_indicator` | `true` | Show a `💭 Saving to Nadia long-term memory…` status line when a turn is saved (or that earlier saves failed, so a broken save path is not silent). Turn off for customer-facing agents. |
 | `retain_user_prefix` | `User` | Label used before user turns in auto-retained transcripts. A turn Hermes marks as written by another agent gets that agent's name as its role and label instead (`Bot` when it has none) |
 | `retain_assistant_prefix` | `Assistant` | Label used before assistant turns in auto-retained transcripts. The tools the agent called that turn go just before it, as one `Tool call: name(args)` line each (arguments cut short, output never sent), so a reply that summarises a page or video is not stored as the agent's or the user's own experience |
 | `prefetch_waits_for_retain` | `true` | Before the background recall for the next turn, wait until the turn just saved can be found, so recall includes it. Runs off the reply path and adds no response time. |
@@ -501,7 +501,7 @@ These are used **only when there is no config file at all**. Once `hermes memory
 | `HINDSIGHT_BUDGET` | Recall budget (`recall_budget`) |
 | `HINDSIGHT_REFLECT_BUDGET` | Reflect budget (`reflect_budget`) |
 | `HINDSIGHT_RETAIN_CONTEXT` | Label stored with each retained conversation (`retain_context`) |
-| `HINDSIGHT_RETAIN_INDICATOR` | `false` hides the "Saving to long-term memory" status line (`retain_indicator`) |
+| `HINDSIGHT_RETAIN_INDICATOR` | `false` hides the "Saving to Nadia long-term memory" status line (`retain_indicator`) |
 | `HINDSIGHT_RECALL_INDICATOR` | `false` hides the "recalled N memories" status line (`recall_indicator`) |
 | `HINDSIGHT_RECALL_SYNC` | `true` recalls against the current message before answering (`recall_sync`) |
 
@@ -522,7 +522,7 @@ The provider works across every gateway platform. Hermes builds a fresh agent pe
 provider is re-initialized with it, so auto-recall runs for each turn regardless of platform.
 
 Two settings are worth turning off for customer-facing bots: `recall_indicator` and
-`retain_indicator`, which otherwise print a `💭` long-term memory status line into the user's channel.
+`retain_indicator`, which otherwise print a `💭` Nadia long-term memory status line into the user's channel.
 
 To use different settings in different chats, topics or platforms, see [Per-chat settings](#per-chat-settings--chats).
 

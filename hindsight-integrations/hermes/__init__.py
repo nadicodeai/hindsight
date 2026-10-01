@@ -89,6 +89,7 @@ from .settings import (
     _template_fields,
     resolve_chat_config,
     _sanitize_bank_segment,
+    _template_fields,
 )
 
 logger = logging.getLogger(__name__)
@@ -191,7 +192,7 @@ _PREFETCH_JOIN_SECONDS = 3.0
 # "nothing found" (#6482). Fixed text, never the exception: errors can carry hosts and URLs. It is
 # worded so a customer-facing agent need not announce an outage, only not read the gap as fact.
 _RECALL_FAILED_NOTE = (
-    "# Long-term memory\n"
+    "# Nadia long-term memory\n"
     "Memory lookup failed this turn, so context from earlier sessions is missing. Don't conclude "
     "the user never told you something just because it is not here."
 )
@@ -479,7 +480,7 @@ def _run_sync(coro, timeout: float = _DEFAULT_TIMEOUT):
 RETAIN_SCHEMA = {
     "name": "long_term_memory_save",
     "description": (
-        "Store information to long-term memory. It automatically "
+        "Store information in Nadia long-term memory. It automatically "
         "extracts structured facts, resolves entities, and indexes for retrieval."
     ),
     "parameters": {
@@ -535,7 +536,7 @@ def _with_property(schema: dict, name: str, prop: dict) -> dict:
 RECALL_SCHEMA = {
     "name": "long_term_memory_search",
     "description": (
-        "Search long-term memory. Returns memories ranked by relevance using "
+        "Search Nadia long-term memory. Returns memories ranked by relevance using "
         "semantic search, keyword matching, entity graph traversal, and reranking."
     ),
     "parameters": {
@@ -548,7 +549,7 @@ RECALL_SCHEMA = {
 REFLECT_SCHEMA = {
     "name": "long_term_memory_reflect",
     "description": (
-        "Synthesize a reasoned answer from long-term memories. Unlike recall, "
+        "Synthesize a reasoned answer from Nadia long-term memory. Unlike recall, "
         "this reasons across all stored memories to produce a coherent response."
     ),
     "parameters": {
@@ -1135,12 +1136,12 @@ class HindsightMemoryProvider(MemoryProvider):
             },
             {
                 "key": "recall_indicator",
-                "description": "Show a '💭 Long-term memory — recalled N memories' status line when auto-recall injects memory (turn off for customer-facing agents)",
+                "description": "Show a '💭 Nadia long-term memory — recalled N memories' status line when auto-recall injects memory (turn off for customer-facing agents)",
                 "default": True,
             },
             {
                 "key": "retain_indicator",
-                "description": "Show a '💭 Saving to long-term memory…' status line when a turn is saved to memory (turn off for customer-facing agents)",
+                "description": "Show a '💭 Saving to Nadia long-term memory…' status line when a turn is saved to memory (turn off for customer-facing agents)",
                 "default": True,
             },
             {"key": "auto_retain", "description": "Automatically retain conversation turns", "default": True},
@@ -1866,9 +1867,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._bank_id = _person_bank(self._person)
         self._write_bank_ids = [self._bank_id]
         self._read_banks = [self._bank_id] + ([TEAM_BANK, PUBLIC_BANK] if self._inside else [PUBLIC_BANK])
-        logger.info(
-            "Memory: person=%s inside=%s reads=%s", self._person, self._inside, ",".join(self._read_banks)
-        )
+        logger.info("Memory: person=%s inside=%s reads=%s", self._person, self._inside, ",".join(self._read_banks))
 
     def _bank_label(self, bank: str) -> str:
         return _BANK_LABELS.get(bank) or ("this person's own memory" if bank == self._bank_id else f"the memory {bank}")
@@ -2154,7 +2153,7 @@ class HindsightMemoryProvider(MemoryProvider):
             tail += _PAGE_GUIDANCE
         if self._writes_disabled:  # the retain tool is not offered to a read-only kanban worker
             tail = tail.replace(_RETAIN_GUIDANCE, "")
-        block = f"# Long-term memory\nActive{label}.\n{tail}"
+        block = f"# Nadia long-term memory\nActive{label}.\n{tail}"
         if self._session_context_block is None:
             self._session_context_block = self._load_session_context()
         return f"{block}\n\n{self._session_context_block}" if self._session_context_block else block
@@ -2196,7 +2195,7 @@ class HindsightMemoryProvider(MemoryProvider):
             sections.append(f"## {name}\n{content.strip()}")
         if not sections:
             return ""
-        return "# Background from long-term memory\nRead at session start.\n\n" + "\n\n".join(sections)
+        return "# Background from Nadia long-term memory\nRead at session start.\n\n" + "\n\n".join(sections)
 
     # -- recall ------------------------------------------------------------------
 
@@ -2230,7 +2229,9 @@ class HindsightMemoryProvider(MemoryProvider):
         """
         bank_ids = [
             bank_id
-            for i, bank_id in enumerate(banks or (self._read_banks if getattr(self, "_audience", False) else self._build_recall_bank_ids()))
+            for i, bank_id in enumerate(
+                banks or (self._read_banks if getattr(self, "_audience", False) else self._build_recall_bank_ids())
+            )
             if i == 0 or self._extra_bank_available("recall", bank_id)
         ]
         max_tokens = self._recall_max_tokens
@@ -2352,7 +2353,7 @@ class HindsightMemoryProvider(MemoryProvider):
             return ""
         logger.debug("Prefetch: returning %d chars of context", len(result))
         header = self._recall_prompt_preamble or (
-            "# Long-term memory (persistent cross-session context)\n"
+            "# Nadia long-term memory (persistent cross-session context)\n"
             "Use this to answer questions about the user and prior sessions. "
             "Do not call tools to look up information that is already present here."
         )
@@ -2390,7 +2391,9 @@ class HindsightMemoryProvider(MemoryProvider):
         """Count injected by the last prefetch; None if nothing injected or ``recall_indicator=false``."""
         if not self._recall_indicator or not self._last_recall_returned:
             return None
-        return RecallStatus(provider_label="Long-term memory", count=self._last_recall_count, glyph=_HINDSIGHT_GLYPH)
+        return RecallStatus(
+            provider_label="Nadia long-term memory", count=self._last_recall_count, glyph=_HINDSIGHT_GLYPH
+        )
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
         # Sync mode recalls live each turn — nothing to prime in the background.
@@ -2714,12 +2717,12 @@ class HindsightMemoryProvider(MemoryProvider):
         turn path only; the writer thread only ever increments ``_retains_dropped``."""
         if (dropped := self._retains_dropped - self._retains_dropped_shown) > 0:
             self._retains_dropped_shown += dropped
-            return f"{dropped} earlier save(s) to long-term memory failed and were dropped (see the log)"
+            return f"{dropped} earlier save(s) to Nadia long-term memory failed and were dropped (see the log)"
         with self._retain_backlog_lock:  # the writer pops from it
             waiting = sum(1 for entry in self._retain_backlog if entry.failures)
         if waiting:
-            return f"Couldn't save to long-term memory yet, will retry ({waiting} waiting)"
-        return "Saving to long-term memory…"
+            return f"Couldn't save to Nadia long-term memory yet, will retry ({waiting} waiting)"
+        return "Saving to Nadia long-term memory…"
 
     def _enqueue_retain(self, retain: _PendingRetain) -> None:
         """Hand *retain* to the (lazily started) writer and arm the atexit drain."""
@@ -3047,7 +3050,7 @@ class HindsightMemoryProvider(MemoryProvider):
         except OSError as exc:
             logger.warning("Hindsight could not save %d unsent retain(s), they are lost: %s", len(unsent), exc)
             return
-        msg = f"Long-term memory: {len(unsent)} save(s) not sent yet, will send them next time."
+        msg = f"Nadia long-term memory: {len(unsent)} save(s) not sent yet, will send them next time."
         logger.warning("%s (%s)", msg, path)
         if self._warning_callback is not None:
             with contextlib.suppress(Exception):
