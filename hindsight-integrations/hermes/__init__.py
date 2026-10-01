@@ -313,9 +313,9 @@ def _run_sync(coro, timeout: float = _DEFAULT_TIMEOUT):
 
 
 RETAIN_SCHEMA = {
-    "name": "hindsight_retain",
+    "name": "long_term_memory_save",
     "description": (
-        "Store information to long-term memory. Hindsight automatically "
+        "Store information to long-term memory. It automatically "
         "extracts structured facts, resolves entities, and indexes for retrieval."
     ),
     "parameters": {
@@ -334,7 +334,7 @@ RETAIN_SCHEMA = {
                     "When the remembered event actually happened, as an ISO-8601 date "
                     "or datetime (e.g. '2026-08-20' or '2026-08-20T14:30:00+02:00'). "
                     "Pass this whenever the memory references a specific event time "
-                    "('yesterday', 'last Tuesday', 'on March 3rd') so Hindsight can "
+                    "('yesterday', 'last Tuesday', 'on March 3rd') so the memory can "
                     "anchor it on the timeline. Omit for timeless facts/preferences."
                 ),
             },
@@ -344,7 +344,7 @@ RETAIN_SCHEMA = {
 }
 
 RECALL_SCHEMA = {
-    "name": "hindsight_recall",
+    "name": "long_term_memory_search",
     "description": (
         "Search long-term memory. Returns memories ranked by relevance using "
         "semantic search, keyword matching, entity graph traversal, and reranking."
@@ -357,7 +357,7 @@ RECALL_SCHEMA = {
 }
 
 REFLECT_SCHEMA = {
-    "name": "hindsight_reflect",
+    "name": "long_term_memory_reflect",
     "description": (
         "Synthesize a reasoned answer from long-term memories. Unlike recall, "
         "this reasons across all stored memories to produce a coherent response."
@@ -457,12 +457,12 @@ _METADATA_ATTRS = (
 # history question and skipped Hindsight's deduplicated memories.
 _TOOL_GUIDANCE = (
     "For cross-session facts, user preferences, and past decisions, "
-    "prefer hindsight_recall over session_search — it returns "
+    "prefer long_term_memory_search over session_search — it returns "
     "deduplicated, high-density observations across sessions. "
-    "Use hindsight_reflect for cross-session pattern synthesis. "
+    "Use long_term_memory_reflect for cross-session pattern synthesis. "
     "Use session_search only when you need verbatim transcripts or "
     "exact wording from a specific conversation. "
-    "Use hindsight_retain to store facts."
+    "Use long_term_memory_save to store facts."
 )
 _CONTEXT_NOTE = "Relevant memories are automatically injected into context."
 _SYSTEM_PROMPT_TAILS = {
@@ -758,12 +758,12 @@ class HindsightMemoryProvider(MemoryProvider):
             },
             {
                 "key": "recall_types",
-                "description": "Fact types to surface on recall — applies to both auto-recall and the hindsight_recall tool (comma-separated or list). Defaults to observation-only — observations are Hindsight's consolidated, deduplicated, evidence-grounded knowledge layer; raw world/experience facts are the supporting evidence observations already summarize. Set to e.g. 'observation,world,experience' to also include raw facts.",
+                "description": "Fact types to surface on recall — applies to both auto-recall and the long_term_memory_search tool (comma-separated or list). Defaults to observation-only — observations are Hindsight's consolidated, deduplicated, evidence-grounded knowledge layer; raw world/experience facts are the supporting evidence observations already summarize. Set to e.g. 'observation,world,experience' to also include raw facts.",
                 "default": "observation",
             },
             {
                 "key": "recall_min_scores",
-                "description": 'Minimum relevance per score field, as a JSON object (e.g. {"reranker": 0.25}). Recall always returns up to recall_max_tokens of the best-ranked memories even when none is relevant; memories under a floor are dropped from auto-recall and the hindsight_recall tool, so an off-topic turn injects nothing. Default: no floor',
+                "description": 'Minimum relevance per score field, as a JSON object (e.g. {"reranker": 0.25}). Recall always returns up to recall_max_tokens of the best-ranked memories even when none is relevant; memories under a floor are dropped from auto-recall and the long_term_memory_search tool, so an off-topic turn injects nothing. Default: no floor',
                 "default": "",
             },
             {"key": "auto_recall", "description": "Automatically recall memories before each turn", "default": True},
@@ -774,12 +774,12 @@ class HindsightMemoryProvider(MemoryProvider):
             },
             {
                 "key": "recall_indicator",
-                "description": "Show a '👁️ Hindsight — recalled N memories' status line when auto-recall injects memory (turn off for customer-facing agents)",
+                "description": "Show a '👁️ Long-term memory — recalled N memories' status line when auto-recall injects memory (turn off for customer-facing agents)",
                 "default": True,
             },
             {
                 "key": "retain_indicator",
-                "description": "Show a '👁️ Hindsight — saving to memory…' status line when a turn is saved to memory (turn off for customer-facing agents)",
+                "description": "Show a '👁️ Saving to long-term memory…' status line when a turn is saved to memory (turn off for customer-facing agents)",
                 "default": True,
             },
             {"key": "auto_retain", "description": "Automatically retain conversation turns", "default": True},
@@ -1502,7 +1502,7 @@ class HindsightMemoryProvider(MemoryProvider):
         label = "" if mode == "hybrid" else f" ({mode} mode)"
         # With auto_recall off nothing is injected, so hybrid must not promise injected context.
         tail = _TOOL_GUIDANCE if mode == "hybrid" and not self._auto_recall else _SYSTEM_PROMPT_TAILS[mode]
-        return f"# Hindsight Memory\nActive{label}. Bank: {self._bank_id}, budget: {self._budget}.\n{tail}"
+        return f"# Long-term memory\nActive{label}.\n{tail}"
 
     # -- recall ------------------------------------------------------------------
 
@@ -1624,7 +1624,7 @@ class HindsightMemoryProvider(MemoryProvider):
             return ""
         logger.debug("Prefetch: returning %d chars of context", len(result))
         header = self._recall_prompt_preamble or (
-            "# Hindsight Memory (persistent cross-session context)\n"
+            "# Long-term memory (persistent cross-session context)\n"
             "Use this to answer questions about the user and prior sessions. "
             "Do not call tools to look up information that is already present here."
         )
@@ -1654,7 +1654,7 @@ class HindsightMemoryProvider(MemoryProvider):
         """Count injected by the last prefetch; None if nothing injected or ``recall_indicator=false``."""
         if not self._recall_indicator or not self._last_recall_returned:
             return None
-        return RecallStatus(provider_label="Hindsight", count=self._last_recall_count, glyph=_HINDSIGHT_GLYPH)
+        return RecallStatus(provider_label="Long-term memory", count=self._last_recall_count, glyph=_HINDSIGHT_GLYPH)
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
         # Sync mode recalls live each turn — nothing to prime in the background.
@@ -1845,7 +1845,7 @@ class HindsightMemoryProvider(MemoryProvider):
         # Model-independent status line; no-op without retain_indicator/status channel.
         if self._retain_indicator and self._status_callback is not None:
             try:
-                self._status_callback(f"{_HINDSIGHT_GLYPH} Hindsight — saving to memory…")
+                self._status_callback(f"{_HINDSIGHT_GLYPH} Saving to long-term memory…")
             except Exception:
                 logger.debug("Retain indicator emit failed (non-fatal)", exc_info=True)
         self._enqueue_retain(job)
@@ -1899,7 +1899,7 @@ class HindsightMemoryProvider(MemoryProvider):
 
         def _write(bank_id: str) -> None:
             logger.debug(
-                "Tool hindsight_retain: bank=%s, content_len=%d, context=%s",
+                "Tool long_term_memory_save: bank=%s, content_len=%d, context=%s",
                 bank_id,
                 len(content),
                 context,
@@ -1909,31 +1909,31 @@ class HindsightMemoryProvider(MemoryProvider):
                 self._track_retain_ops(resp, bank_id)
 
         self._write_to_banks(list(self._write_bank_ids), _write)
-        logger.debug("Tool hindsight_retain: success")
+        logger.debug("Tool long_term_memory_save: success")
         # An async retain is only accepted here; the memory is searchable once the server processes it.
         return "Memory queued for storage." if self._retain_async else "Memory stored successfully."
 
     def _tool_recall(self, args: dict) -> str:
         query = args["query"]
-        logger.debug("Tool hindsight_recall: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._budget)
+        logger.debug("Tool long_term_memory_search: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._budget)
         results = self._recall(query)
-        logger.debug("Tool hindsight_recall: %d results", len(results))
+        logger.debug("Tool long_term_memory_search: %d results", len(results))
         return "\n".join(f"{i}. {r.text}" for i, r in enumerate(results, 1)) or "No relevant memories found."
 
     def _tool_reflect(self, args: dict) -> str:
         query = args["query"]
         logger.debug(
-            "Tool hindsight_reflect: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._budget
+            "Tool long_term_memory_reflect: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._budget
         )
         text = self._reflect(query) or ""
-        logger.debug("Tool hindsight_reflect: response_len=%d", len(text))
+        logger.debug("Tool long_term_memory_reflect: response_len=%d", len(text))
         return text or "No relevant memories found."
 
     # tool name -> (required arg, handler, user-facing failure prefix)
     _TOOL_HANDLERS = {
-        "hindsight_retain": ("content", _tool_retain, "Failed to store memory"),
-        "hindsight_recall": ("query", _tool_recall, "Failed to search memory"),
-        "hindsight_reflect": ("query", _tool_reflect, "Failed to reflect"),
+        "long_term_memory_save": ("content", _tool_retain, "Failed to store memory"),
+        "long_term_memory_search": ("query", _tool_recall, "Failed to search memory"),
+        "long_term_memory_reflect": ("query", _tool_reflect, "Failed to reflect"),
     }
 
     def handle_tool_call(self, tool_name: str, args: dict, **kwargs) -> str:
@@ -1946,7 +1946,7 @@ class HindsightMemoryProvider(MemoryProvider):
             return json.dumps({"result": handler(self, args)})
         except Exception as e:
             logger.warning("%s failed: %s", tool_name, e, exc_info=True)
-            return tool_error(f"{failure}: {str(e) or type(e).__name__}")
+            return tool_error(failure)
 
     # -- session lifecycle -------------------------------------------------------
 
