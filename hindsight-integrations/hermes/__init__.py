@@ -72,6 +72,7 @@ from .settings import (
     _repository_root,
     _resolve_bank_id_template,
     _template_fields,
+    _sanitize_bank_segment,
 )
 
 logger = logging.getLogger(__name__)
@@ -282,6 +283,31 @@ RETAIN_SCHEMA = {
     },
 }
 
+_FOR_PROPERTY = {
+    "type": "string",
+    "enum": ["me", "team", "everyone"],
+    "description": (
+        "Who this memory is for. 'me' (default): about the person you are talking to. 'team': "
+        "internal company knowledge, for the company's own people only. 'everyone': company facts "
+        "anyone may know, such as opening hours, addresses and products."
+    ),
+}
+
+_CLIENT_PROPERTY = {
+    "type": "string",
+    "description": (
+        "Only when one of the company's own people asks about someone outside the company: that "
+        "person's name (e.g. 'Rossi'), or 'platform:id', to search what they told us."
+    ),
+}
+
+
+def _with_property(schema: dict, name: str, prop: dict) -> dict:
+    params = dict(schema["parameters"])
+    params["properties"] = {**params["properties"], name: prop}
+    return {**schema, "parameters": params}
+
+
 RECALL_SCHEMA = {
     "name": "long_term_memory_search",
     "description": (
@@ -316,6 +342,27 @@ def _bank_not_written_yet(exc: Exception) -> bool:
     return getattr(exc, "status", None) == 404
 
 
+# Inside and outside: when ``inside_platforms`` is set, memory belongs to people and to the
+# company instead of to one bank. Each person has their own bank; inside people (on an inside
+# platform, or with no sender at all: the owner at a terminal or a scheduled task) also read
+# the team's and the public knowledge, and may add to them on purpose; everyone else reads
+# only their own memory and the public knowledge.
+TEAM_BANK = "company"
+PUBLIC_BANK = "public"
+OWNER = "owner"
+_SAVE_TARGETS = {"team": TEAM_BANK, "everyone": PUBLIC_BANK}
+_BANK_LABELS = {TEAM_BANK: "the team's knowledge", PUBLIC_BANK: "public knowledge"}
+
+
+def _person_bank(person: str) -> str:
+    return "person-" + _sanitize_bank_segment(person)
+
+
+def _parse_platforms(value) -> frozenset:
+    items = value if isinstance(value, (list, tuple)) else str(value or "").split(",")
+    return frozenset(str(item).strip().lower() for item in items if str(item).strip())
+
+
 def _load_config() -> dict:
     """$HERMES_HOME/hindsight/config.json (profile-scoped), else ~/.hindsight/config.json
     (legacy, shared), else environment variables."""
@@ -332,6 +379,7 @@ def _load_config() -> dict:
         "timeout": _parse_int_setting(os.environ.get("HINDSIGHT_TIMEOUT"), _DEFAULT_TIMEOUT),
         "idle_timeout": _parse_int_setting(os.environ.get("HINDSIGHT_IDLE_TIMEOUT"), _DEFAULT_IDLE_TIMEOUT),
         "retain_tags": get_secret("HINDSIGHT_RETAIN_TAGS", "") or "",
+        "inside_platforms": get_secret("HINDSIGHT_INSIDE_PLATFORMS", "") or "",
         "observation_scopes": get_secret("HINDSIGHT_RETAIN_OBSERVATION_SCOPES", "") or "",
         "retain_source": _scoped_setting("HINDSIGHT_RETAIN_SOURCE", _DEFAULT_RETAIN_SOURCE),
         "retain_strategy": _scoped_setting("HINDSIGHT_RETAIN_STRATEGY", _DEFAULT_RETAIN_STRATEGY),
@@ -1071,6 +1119,7 @@ class HindsightMemoryProvider(MemoryProvider):
                 self._mode = "disabled"
                 return
         self._apply_connection_settings(cfg)
+        self._apply_audience(cfg)
         self._apply_retain_settings(cfg)
         self._apply_recall_settings(cfg)
 
@@ -1189,6 +1238,58 @@ class HindsightMemoryProvider(MemoryProvider):
             if bank not in ordered:
                 ordered.append(bank)
         return ordered
+
+    def _apply_audience(self, cfg: dict) -> None:
+        """Inside or outside, from the platform and the sender. Unset ``inside_platforms`` keeps
+        upstream's single bank: the person's bank is the configured one and nothing else is read."""
+        self._inside_platforms = _parse_platforms(cfg.get("inside_platforms", ""))
+        self._audience = bool(self._inside_platforms)
+        self._bank_named = False
+        if not self._audience:
+            self._person, self._inside = "", True
+            self._read_banks = [self._bank_id]
+            return
+        if not self._user_id:
+            self._person, self._inside = OWNER, True
+        else:
+            self._person = f"{self._platform}-{self._user_id}"
+            self._inside = self._platform.lower() in self._inside_platforms
+        self._bank_id = _person_bank(self._person)
+        self._write_bank_ids = [self._bank_id]
+        self._read_banks = [self._bank_id] + ([TEAM_BANK, PUBLIC_BANK] if self._inside else [PUBLIC_BANK])
+        logger.info(
+            "Memory: person=%s inside=%s reads=%s", self._person, self._inside, ",".join(self._read_banks)
+        )
+
+    def _bank_label(self, bank: str) -> str:
+        return _BANK_LABELS.get(bank) or ("this person's own memory" if bank == self._bank_id else f"the memory {bank}")
+
+    def _name_outside_bank(self) -> None:
+        """An outside person's bank carries their display name, so inside people can find it."""
+        if not getattr(self, "_audience", False) or self._bank_named or self._inside or not self._user_name:
+            return
+        self._bank_named = True
+        with contextlib.suppress(Exception):
+            self._run_hindsight_operation(lambda c: c.acreate_bank(self._bank_id, name=self._user_name))
+
+    def _outside_banks_named(self, name: str) -> list:
+        """Outside people's banks whose display name contains *name*."""
+        import urllib.request
+
+        request = urllib.request.Request(f"{self._api_url.rstrip('/')}/v1/default/banks")
+        if self._api_key:
+            request.add_header("Authorization", f"Bearer {self._api_key}")
+        with urllib.request.urlopen(request, timeout=self._timeout) as resp:
+            banks = json.load(resp).get("banks", [])
+        inside = (_person_bank(OWNER), *(f"person-{p}-" for p in self._inside_platforms))
+        wanted = name.casefold()
+        return [
+            b["bank_id"]
+            for b in banks
+            if b.get("bank_id", "").startswith("person-")
+            and not b["bank_id"].startswith(inside)
+            and wanted in (b.get("name") or "").casefold()
+        ]
 
     def _apply_connection_settings(self, cfg: dict) -> None:
         """Endpoint, bank and mode selectors from *cfg* (env fallbacks where documented)."""
@@ -1412,7 +1513,7 @@ class HindsightMemoryProvider(MemoryProvider):
             logger.debug("Prefetch: skipped (%s)", why)
         return why is not None
 
-    def _recall(self, query: str) -> list:
+    def _recall(self, query: str, banks: list | None = None) -> list:
         """Semantic recall across the write set (primary bank first, then
         mirrors/additional banks), then any recall-only banks. A result whose text an
         earlier bank already returned is dropped.
@@ -1420,11 +1521,13 @@ class HindsightMemoryProvider(MemoryProvider):
         All banks are queried concurrently, each with the configured budget and
         ``recall_max_tokens``. A primary-bank failure raises, exactly as the
         single-bank recall does; a failing extra bank is skipped with a warning.
-        Single-bank configs query exactly ``_bank_id``.
+        Single-bank configs query exactly ``_bank_id``. With ``inside_platforms`` set, the
+        banks are the person's read banks (or the *banks* a lookup names), and the results
+        are ordered by their final score across banks.
         """
         bank_ids = [
             bank_id
-            for i, bank_id in enumerate(self._build_recall_bank_ids())
+            for i, bank_id in enumerate(banks or (self._read_banks if getattr(self, "_audience", False) else self._build_recall_bank_ids()))
             if i == 0 or self._extra_bank_available("recall", bank_id)
         ]
         kwargs: dict = {"query": query, "budget": self._budget, "max_tokens": self._recall_max_tokens}
@@ -1474,18 +1577,26 @@ class HindsightMemoryProvider(MemoryProvider):
             kept = [r for r in bank_results if getattr(r, "text", None) not in seen]
             results.extend(kept)
             seen.update(text for r in kept if (text := getattr(r, "text", None)))
+        if getattr(self, "_audience", False) and len(bank_ids) > 1:
+            results.sort(key=lambda r: getattr(getattr(r, "scores", None), "final", 0) or 0, reverse=True)
         return results
 
     def _reflect(self, query: str) -> str | None:
-        try:
-            resp = self._run_hindsight_operation(
-                lambda client: client.areflect(bank_id=self._bank_id, query=query, budget=self._budget)
-            )
-        except Exception as exc:
-            if _bank_not_written_yet(exc):
-                return None
-            raise
-        return resp.text
+        answers = []
+        for bank in self._read_banks:
+            try:
+                resp = self._run_hindsight_operation(
+                    lambda client, bank=bank: client.areflect(bank_id=bank, query=query, budget=self._budget)
+                )
+            except Exception as exc:
+                if _bank_not_written_yet(exc):
+                    continue
+                raise
+            if resp.text:
+                answers.append((bank, resp.text))
+        if len(self._read_banks) == 1:
+            return answers[0][1] if answers else None
+        return "\n\n".join(f"From {self._bank_label(bank)}:\n{text}" for bank, text in answers) or None
 
     def _do_recall(self, query: str) -> tuple[str, int]:
         """One recall/reflect for *query* (background prefetch and ``recall_sync`` paths)
@@ -1643,6 +1754,7 @@ class HindsightMemoryProvider(MemoryProvider):
         retain_async, retain_context = self._retain_async, self._retain_context
 
         def _job() -> None:
+            self._name_outside_bank()
             item = self._build_retain_kwargs(
                 content, context=retain_context, metadata=metadata, tags=tags, update_mode=update_mode
             )
@@ -1763,31 +1875,55 @@ class HindsightMemoryProvider(MemoryProvider):
     # -- tools -------------------------------------------------------------------
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
-        return [] if self._memory_mode == "context" else [RETAIN_SCHEMA, RECALL_SCHEMA, REFLECT_SCHEMA]
+        if self._memory_mode == "context":
+            return []
+        if not getattr(self, "_audience", False):
+            return [RETAIN_SCHEMA, RECALL_SCHEMA, REFLECT_SCHEMA]
+        return [_with_property(RETAIN_SCHEMA, "for", _FOR_PROPERTY),
+                _with_property(RECALL_SCHEMA, "client", _CLIENT_PROPERTY), REFLECT_SCHEMA]
 
     def _tool_retain(self, args: dict) -> str:
         content, context = args["content"], args.get("context")
         item = self._build_retain_kwargs(
             content, context=context, tags=args.get("tags"), occurred_at=args.get("occurred_at")
         )
+        if not getattr(self, "_audience", False):
 
-        def _write(bank_id: str) -> None:
-            logger.debug(
-                "Tool long_term_memory_save: bank=%s, content_len=%d, context=%s",
-                bank_id,
-                len(content),
-                context,
+            def _write(bank_id: str) -> None:
+                logger.debug(
+                    "Tool long_term_memory_save: bank=%s, content_len=%d, context=%s",
+                    bank_id,
+                    len(content),
+                    context,
+                )
+                self._retain_batch(item, bank_id=bank_id)
+
+            self._write_to_banks(list(self._write_bank_ids), _write)
+            logger.debug("Tool long_term_memory_save: success")
+            return "Memory stored successfully."
+        wanted = args.get("for") or "me"
+        bank = _SAVE_TARGETS.get(wanted) if self._inside else None
+        bank = bank or self._bank_id
+        self._name_outside_bank()
+        self._retain_batch(item, bank_id=bank)
+        logger.info("Memory: person=%s save for=%s -> %s", self._person, wanted, bank)
+        if bank == self._bank_id and wanted != "me":
+            return (
+                "Saved only in this person's own memory: they are not one of the company's own people, "
+                "so they cannot add to the company's knowledge. Do not tell them it was saved for others."
             )
-            self._retain_batch(item, bank_id=bank_id)
-
-        self._write_to_banks(list(self._write_bank_ids), _write)
-        logger.debug("Tool long_term_memory_save: success")
-        return "Memory stored successfully."
+        return f"Saved in {self._bank_label(bank)}."
 
     def _tool_recall(self, args: dict) -> str:
-        query = args["query"]
-        logger.debug("Tool long_term_memory_search: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._budget)
-        results = self._recall(query)
+        query, client = args["query"], str(args.get("client") or "").strip()
+        banks = None
+        if client and getattr(self, "_audience", False) and self._inside:
+            platform, sep, user = client.partition(":")
+            banks = [_person_bank(f"{platform}-{user}")] if sep else self._outside_banks_named(client)
+            logger.info("Memory: person=%s search client=%r -> %s", self._person, client, banks)
+            if not banks:
+                return "No one outside the company by that name is in memory."
+        results = self._recall(query, banks)
         logger.debug("Tool long_term_memory_search: %d results", len(results))
         return "\n".join(f"{i}. {r.text}" for i, r in enumerate(results, 1)) or "No relevant memories found."
 

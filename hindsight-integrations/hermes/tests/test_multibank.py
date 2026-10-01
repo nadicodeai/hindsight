@@ -309,7 +309,7 @@ def test_single_bank_recall_error_reaches_the_tool_as_a_failure():
     _fake_recall(provider, {"primary": RuntimeError("connection refused")})
 
     result = provider.handle_tool_call("long_term_memory_search", {"query": "q"})
-    assert "Failed to search memory: connection refused" in result
+    assert result == "ERROR: Failed to search memory"
     assert "No relevant memories found" not in result
 
 
@@ -368,7 +368,7 @@ def test_retain_tool_reports_failure_when_the_primary_fails():
     result = provider.handle_tool_call("long_term_memory_save", {"content": "a fact"})
 
     assert written == ["primary"]
-    assert "Failed to store memory: primary unavailable" in result
+    assert result == "ERROR: Failed to store memory"
 
 
 def test_mirror_uses_the_nested_bank_id_form_like_the_fallback(tmp_path: Path):
