@@ -368,6 +368,10 @@ def _load_config() -> dict:
         "recall_indicator": _env_flag("HINDSIGHT_RECALL_INDICATOR", True),
         "recall_sync": _env_flag("HINDSIGHT_RECALL_SYNC", False),
         "inside_platforms": get_secret("HINDSIGHT_INSIDE_PLATFORMS", "") or "",
+        # local_embedded's server: its LLM, and the Hermes login whose key and address it uses.
+        "llm_provider": get_secret("HINDSIGHT_LLM_PROVIDER", "") or "",
+        "llm_model": get_secret("HINDSIGHT_LLM_MODEL", "") or "",
+        "llm_credential_pool": get_secret("HINDSIGHT_LLM_CREDENTIAL_POOL", "") or "",
         "observation_scopes": get_secret("HINDSIGHT_RETAIN_OBSERVATION_SCOPES", "") or "",
         "retain_source": _scoped_setting("HINDSIGHT_RETAIN_SOURCE", _DEFAULT_RETAIN_SOURCE),
         "retain_user_prefix": _scoped_setting("HINDSIGHT_RETAIN_USER_PREFIX", "User"),

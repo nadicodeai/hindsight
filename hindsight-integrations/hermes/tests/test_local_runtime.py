@@ -250,7 +250,9 @@ def _pool_named(monkeypatch, entry):
 
 
 def test_a_named_hermes_login_supplies_the_server_key_and_address(monkeypatch):
-    pools = _pool_named(monkeypatch, SimpleNamespace(runtime_api_key="sk-row", runtime_base_url="https://gw.example/v1"))
+    pools = _pool_named(
+        monkeypatch, SimpleNamespace(runtime_api_key="sk-row", runtime_base_url="https://gw.example/v1")
+    )
     env = embedded._build_embedded_profile_env(
         {"llm_credential_pool": "nadicode", "llm_provider": "openai", "llm_model": "m"}
     )
