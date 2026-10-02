@@ -288,7 +288,7 @@ wheels = [
 
 [[package]]
 name = "hermes-plugin-hindsight"
-version = "1.2.0"
+version = "1.2.1"
 source = { virtual = "." }
 dependencies = [
     { name = "hindsight-client" },
@@ -303,7 +303,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "hindsight-client", specifier = ">=0.10.1,<1" },
-    { name = "hindsight-embed", specifier = ">=0.10.1,<1" },
+    { name = "hindsight-embed", specifier = "==0.10.2+nadia.2" },
 ]
 
 [package.metadata.requires-dev]
@@ -328,15 +328,14 @@ wheels = [
 
 [[package]]
 name = "hindsight-embed"
-version = "0.10.1"
-source = { registry = "https://pypi.org/simple" }
+version = "0.10.2+nadia.2"
+source = { registry = "https://github.com/nadicodeai/hindsight/releases/expanded_assets/nadia-v0.10.2-nadia.2" }
 dependencies = [
     { name = "aiohttp" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/63/e3/85af37fc3b35c24182fb24fa831fd36ad601331eb7e590a3d330cfb44767/hindsight_embed-0.10.1.tar.gz", hash = "sha256:1617b6f24dad1709abed0d5f46e44d99cfcf9602710be7f55ac81fea1a758338", size = 713871, upload-time = "2026-09-21T15:01:34.256Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/ee/c83d04c9825f26f19bbe67702d68902576e62bb0e75cd4123846e4ad2106/hindsight_embed-0.10.1-py3-none-any.whl", hash = "sha256:6cf2294ea94113dcf13b2ca61010d571673d2bca6245cd2c3a714fd760cdb8c0", size = 835478, upload-time = "2026-09-21T15:01:32.814Z" },
+    { url = "https://github.com/nadicodeai/hindsight/releases/download/nadia-v0.10.2-nadia.2/hindsight_embed-0.10.2+nadia.2-py3-none-any.whl" },
 ]
 
 [[package]]
