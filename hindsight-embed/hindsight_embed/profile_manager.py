@@ -185,7 +185,12 @@ def unlock_file(file_obj: IO[str]) -> None:
 from ._http_probe import probe_get
 
 # Configuration paths
-CONFIG_DIR = Path.home() / ".hindsight"
+def hindsight_home() -> Path:
+    """Embed's state folder: ``HINDSIGHT_EMBED_HOME`` when set, else ``~/.hindsight``."""
+    return Path(os.environ.get("HINDSIGHT_EMBED_HOME") or Path.home() / ".hindsight")
+
+
+CONFIG_DIR = hindsight_home()
 PROFILES_DIR = CONFIG_DIR / "profiles"
 METADATA_FILE = PROFILES_DIR / "metadata.json"
 ACTIVE_PROFILE_FILE = CONFIG_DIR / "active_profile"
@@ -269,7 +274,7 @@ class ProfileManager:
 
     def _get_config_dir(self) -> Path:
         """Get config directory path dynamically (supports testing with temp HOME)."""
-        return Path.home() / ".hindsight"
+        return hindsight_home()
 
     def _get_profiles_dir(self) -> Path:
         """Get profiles directory path dynamically."""
@@ -515,7 +520,7 @@ class ProfileManager:
             ProfilePaths with config, lock, log, and port.
         """
         # Use dynamic path resolution to support testing with temporary HOME directories
-        config_dir = Path.home() / ".hindsight"
+        config_dir = hindsight_home()
         profiles_dir = config_dir / "profiles"
 
         if not name:

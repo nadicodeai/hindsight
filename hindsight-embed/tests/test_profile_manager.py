@@ -506,3 +506,10 @@ class TestValidateProfileExists:
         captured = capsys.readouterr()
         assert "Profile 'nonexistent' not found" in captured.err
         assert "hindsight-embed configure --profile nonexistent" in captured.err
+
+
+def test_hindsight_embed_home_names_embeds_folder(monkeypatch, tmp_path):
+    monkeypatch.setenv("HINDSIGHT_EMBED_HOME", str(tmp_path))
+    paths = ProfileManager().resolve_profile_paths("nadia")
+    assert paths.config == tmp_path / "profiles" / "nadia.env"
+    assert paths.lock.parent == tmp_path / "profiles"

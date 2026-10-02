@@ -240,3 +240,31 @@ def test_the_binary_probe_checks_the_scripts_dir_the_manager_uses(monkeypatch):
         embedded.shutil, "which", lambda name, path=None: "/s/hindsight-api" if path == scripts else None
     )
     assert embedded._installed_api_binary_exists() is True
+
+
+def _pool_named(monkeypatch, entry):
+    pools = []
+    module = SimpleNamespace(load_pool=lambda name: pools.append(name) or SimpleNamespace(select=lambda: entry))
+    monkeypatch.setitem(sys.modules, "agent.credential_pool", module)
+    return pools
+
+
+def test_a_named_hermes_login_supplies_the_server_key_and_address(monkeypatch):
+    pools = _pool_named(monkeypatch, SimpleNamespace(runtime_api_key="sk-row", runtime_base_url="https://gw.example/v1"))
+    env = embedded._build_embedded_profile_env(
+        {"llm_credential_pool": "nadicode", "llm_provider": "openai", "llm_model": "m"}
+    )
+    assert pools[0] == "nadicode"
+    assert env["HINDSIGHT_API_LLM_API_KEY"] == "sk-row"
+    assert env["HINDSIGHT_API_LLM_BASE_URL"] == "https://gw.example/v1"
+
+
+def test_a_login_with_no_usable_row_supplies_nothing(monkeypatch):
+    _pool_named(monkeypatch, None)
+    assert embedded._pool_credential({"llm_credential_pool": "nadicode"}) is None
+    assert embedded._pool_credential({}) is None
+
+
+def test_the_profile_env_follows_embeds_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("HINDSIGHT_EMBED_HOME", str(tmp_path))
+    assert embedded._embedded_profile_env_path({"profile": "nadia"}) == tmp_path / "profiles" / "nadia.env"

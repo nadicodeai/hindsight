@@ -260,7 +260,22 @@ def _load_simple_env(path) -> dict[str, str]:
 
 def _embedded_profile_env_path(config: dict[str, Any]) -> Path:
     profile = str(config.get("profile", "hermes") or "hermes")
-    return Path.home() / ".hindsight" / "profiles" / f"{profile}.env"
+    home = Path(os.environ.get("HINDSIGHT_EMBED_HOME") or Path.home() / ".hindsight")
+    return home / "profiles" / f"{profile}.env"
+
+
+def _pool_credential(config: dict[str, Any]) -> tuple[str, str] | None:
+    """The key and address of the Hermes login named by ``llm_credential_pool``, read through
+    Hermes's credential pool, which renews it; None when no login is named or none is usable."""
+    name = str(config.get("llm_credential_pool") or "").strip()
+    if not name:
+        return None
+    from agent.credential_pool import load_pool
+
+    entry = load_pool(name).select()
+    if entry is None:
+        return None
+    return str(entry.runtime_api_key or ""), str(entry.runtime_base_url or "")
 
 
 def _on_disk_llm_api_key(config: dict[str, Any]) -> str:
@@ -284,6 +299,8 @@ def _embedded_llm_api_key(config: dict[str, Any]) -> str:
     """
     if config.get("llmApiKey") or config.get("llm_api_key"):
         return config.get("llmApiKey") or config.get("llm_api_key")
+    if (pooled := _pool_credential(config)) is not None:
+        return pooled[0]
     # NOTE: the vault item is named HINDSIGHT_API_LLM_API_KEY (matching the
     # daemon's env var), not HINDSIGHT_LLM_API_KEY (the setup-wizard name).
     # Accept both so vault-fed scopes resolve regardless of which name the
@@ -326,6 +343,8 @@ def _build_embedded_profile_env(config: dict[str, Any], *, llm_api_key: str | No
     # Base URL is per-profile like the key beside it (the scoped key must not go to the default's host);
     # on the scopeless daemon worker a miss is a miss, never os.environ (same rule as the key above).
     base_url = config.get("llm_base_url")
+    if not base_url and (pooled := _pool_credential(config)) is not None:
+        base_url = pooled[1]
     if not base_url:
         try:
             base_url = get_secret("HINDSIGHT_API_LLM_BASE_URL", "") or ""

@@ -1541,14 +1541,14 @@ provides-extras = ["test"]
 
 [[package]]
 name = "hindsight-api"
-version = "0.10.2"
+version = "0.10.2+nadia.2"
 source = { editable = "hindsight-api" }
 dependencies = [
-    { name = "hindsight-api-slim", extra = ["all"] },
+    { name = "hindsight-api-slim" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "hindsight-api-slim", extras = ["all"], editable = "hindsight-api-slim" }]
+requires-dist = [{ name = "hindsight-api-slim", editable = "hindsight-api-slim" }]
 
 [[package]]
 name = "hindsight-api-slim"
@@ -1892,7 +1892,7 @@ dev = [
 
 [[package]]
 name = "hindsight-embed"
-version = "0.10.2"
+version = "0.10.2+nadia.2"
 source = { editable = "hindsight-embed" }
 dependencies = [
     { name = "aiohttp" },
