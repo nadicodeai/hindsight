@@ -270,3 +270,15 @@ def test_a_login_with_no_usable_row_supplies_nothing(monkeypatch):
 def test_the_profile_env_follows_embeds_home(monkeypatch, tmp_path):
     monkeypatch.setenv("HINDSIGHT_EMBED_HOME", str(tmp_path))
     assert embedded._embedded_profile_env_path({"profile": "nadia"}) == tmp_path / "profiles" / "nadia.env"
+
+
+def test_a_port_embed_seeds_into_the_profile_env_is_no_change(monkeypatch, tmp_path):
+    monkeypatch.setenv("HINDSIGHT_EMBED_HOME", str(tmp_path))
+    config = {"profile": "nadia", "llm_provider": "openai", "llm_model": "m", "llm_api_key": "k"}
+    wanted = embedded._build_embedded_profile_env(config)
+    (tmp_path / "profiles").mkdir()
+    (tmp_path / "profiles" / "nadia.env").write_text(
+        "".join(f"{k}={v}\n" for k, v in {**wanted, "HINDSIGHT_API_PORT": "9177"}.items())
+    )
+    assert embedded._profile_env_differs(config) is False
+    assert embedded._profile_env_differs({**config, "llm_model": "other"}) is True

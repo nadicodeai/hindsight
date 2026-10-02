@@ -317,6 +317,19 @@ def _embedded_llm_api_key(config: dict[str, Any]) -> str:
     return _on_disk_llm_api_key(config)
 
 
+def _profile_env_differs(config: dict[str, Any]) -> bool:
+    """Whether the profile env disagrees with a setting this plugin writes.
+
+    hindsight-embed seeds keys of its own into the same file (the port it chose, through
+    ``_register_profile``), so the file holds more than this plugin writes; comparing the whole
+    file found a difference at every start and restarted the daemon each session. Only the
+    plugin's own keys decide.
+    """
+    wanted = _build_embedded_profile_env(config)
+    on_disk = _load_simple_env(_embedded_profile_env_path(config))
+    return any(on_disk.get(key) != value for key, value in wanted.items())
+
+
 def _may_rewrite_profile_env(config: dict[str, Any]) -> bool:
     """Whether rewriting the profile env file is safe right now.
 
