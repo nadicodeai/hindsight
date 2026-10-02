@@ -183,3 +183,16 @@ def test_without_inside_platforms_the_provider_keeps_one_bank(provider):
     assert [call["bank_id"] for call in fake.retains] == ["team"]
     assert _searched(fake) == ["team"]
     assert all("for" not in s["parameters"]["properties"] for s in instance.get_tool_schemas())
+
+
+def test_the_embedded_servers_llm_and_login_come_from_the_environment(hermes_env):
+    for name, value in {
+        "HINDSIGHT_LLM_PROVIDER": "openai",
+        "HINDSIGHT_LLM_MODEL": "deepseek/deepseek-v4.1-flash",
+        "HINDSIGHT_LLM_CREDENTIAL_POOL": "nadicode",
+    }.items():
+        __import__("conftest").SECRETS[name] = value
+    cfg = plugin._load_config()
+    assert cfg["llm_provider"] == "openai"
+    assert cfg["llm_model"] == "deepseek/deepseek-v4.1-flash"
+    assert cfg["llm_credential_pool"] == "nadicode"
