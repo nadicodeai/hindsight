@@ -182,3 +182,29 @@ async def test_patch_resolve_entities_reaches_the_engine(api_client, memory):
     assert resp.status_code == 422
 
     await memory.delete_bank(bank_id, request_context=RequestContext())
+
+
+@pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
+async def test_delete_removes_one_memory_of_its_bank_for_good_and_no_other_bank_s(api_client, memory):
+    bank_id = f"curation-http-{uuid.uuid4().hex[:8]}"
+    other_bank = f"curation-http-{uuid.uuid4().hex[:8]}"
+    gone = await _insert_fact(memory, bank_id, "Anna's client code is AC-4471.")
+    kept = await _insert_fact(memory, bank_id, "Anna works in Treviso.")
+    elsewhere = await _insert_fact(memory, other_bank, "Marco's client code is MC-1180.")
+
+    deleted = await api_client.delete(f"/v1/default/banks/{bank_id}/memories/{gone}")
+    across = await api_client.delete(f"/v1/default/banks/{bank_id}/memories/{elsewhere}")
+    again = await api_client.delete(f"/v1/default/banks/{bank_id}/memories/{gone}")
+
+    assert (deleted.status_code, across.status_code, again.status_code) == (204, 404, 404)
+    assert (await api_client.get(f"/v1/default/banks/{bank_id}/memories/{gone}")).status_code == 404
+    listed = await api_client.get(f"/v1/default/banks/{bank_id}/memories/list", params={"state": "invalidated"})
+    assert listed.json()["items"] == []
+    assert [
+        item["id"] for item in (await api_client.get(f"/v1/default/banks/{bank_id}/memories/list")).json()["items"]
+    ] == [kept]
+    assert (await api_client.get(f"/v1/default/banks/{other_bank}/memories/{elsewhere}")).status_code == 200
+    pool = await memory._get_pool()
+    async with pool.acquire() as conn:
+        assert await conn.fetchval("SELECT count(*) FROM memory_units WHERE id = $1", uuid.UUID(gone)) == 0
