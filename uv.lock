@@ -1552,7 +1552,7 @@ requires-dist = [{ name = "hindsight-api-slim", editable = "hindsight-api-slim" 
 
 [[package]]
 name = "hindsight-api-slim"
-version = "0.10.2+nadia.1"
+version = "0.10.2+nadia.2"
 source = { editable = "hindsight-api-slim" }
 dependencies = [
     { name = "aiohttp" },
