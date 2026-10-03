@@ -25,19 +25,15 @@ def test_the_probe_requires_only_the_client_and_the_daemon_manager(monkeypatch):
     assert asked == ["hindsight_client", "hindsight_embed.daemon_embed_manager"]
 
 
-@pytest.mark.parametrize(
-    ("missing", "advice"),
-    [("hindsight_client", "hermes pm repair"), ("hindsight_embed", "embedded extra")],
-)
-def test_a_missing_plugin_package_reports_how_to_get_it(monkeypatch, missing, advice):
+def test_a_missing_plugin_package_reports_it_with_the_repair_hint(monkeypatch):
     def _boom(name):
-        raise ModuleNotFoundError(f"No module named '{missing}'")
+        raise ModuleNotFoundError("No module named 'hindsight_embed'")
 
     monkeypatch.setattr(embedded.importlib, "import_module", _boom)
     status = embedded._check_local_runtime()
-    assert status.available is False and missing in status.reason
+    assert status.available is False and "hindsight_embed" in status.reason
     hint = embedded._local_runtime_hint(status.reason)
-    assert advice in hint
+    assert "hermes pm repair" in hint
     assert "hindsight-all" not in hint
 
 

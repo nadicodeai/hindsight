@@ -98,23 +98,17 @@ def _check_local_runtime() -> LocalRuntimeStatus:
 def _local_runtime_hint(reason: str | None) -> str:
     """Guidance when what local_embedded needs in-process is missing.
 
-    hindsight-client is this plugin's dependency, so its miss means the environment was rebuilt
-    without it, and ``hermes pm repair`` is the fix (NousResearch/hermes-agent#7718, #123784).
-    hindsight-embed is the plugin's ``embedded`` extra, which Hermes' package manager does not
-    install: local_embedded needs it installed into Hermes' environment by hand.
+    Both packages are declared in this plugin's ``pyproject.toml``, so a miss means the
+    environment was rebuilt without them (a pm generation that dropped the plugin member, a
+    stripped venv), not that the user has to install a server by hand. ``hermes pm repair`` is the
+    fix; Hermes' own missing-dependency warning names the same command. NousResearch/hermes-agent#7718, #123784.
     """
     text = (reason or "").lower()
-    if "no module named" in text and "hindsight_embed" in text:
+    if "no module named" in text and any(m in text for m in ("hindsight_client", "hindsight_embed")):
         return (
-            " local_embedded needs the plugin's embedded extra, hindsight-embed, which Hermes' package "
-            "manager does not install: install it into Hermes' environment, or use local_external with "
-            "a server you run."
-        )
-    if "no module named" in text and "hindsight_client" in text:
-        return (
-            " The plugin's own package, hindsight-client, is missing from this environment: run "
-            "'hermes pm repair' and restart Hermes to rebuild it. The Hindsight server itself is NOT "
-            "needed here — it runs as a separate process."
+            " The plugin's own packages (hindsight-client, hindsight-embed) are missing from "
+            "this environment: run 'hermes pm repair' and restart Hermes to rebuild them. The Hindsight server itself is NOT needed here — it runs as a "
+            "separate process."
         )
     return ""
 
