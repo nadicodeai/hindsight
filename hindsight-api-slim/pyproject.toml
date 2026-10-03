@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hindsight-api-slim"
-version = "0.10.2+nadia.2"
+version = "0.10.2+nadia.4"
 description = "Hindsight: Agent Memory That Learns"
 license = "MIT"
 readme = "README.md"
@@ -50,12 +50,14 @@ dependencies = [
     #     'otel_component_type'".
     # (2) opentelemetry-proto <1.44 caps protobuf<7.0; 1.44.0 raised it to
     #     protobuf<8.0, which is what lets the protobuf pin below reach 7.x.
-    "opentelemetry-api>=1.44.0",
-    "opentelemetry-sdk>=1.44.0",
-    "opentelemetry-instrumentation-fastapi>=0.65b0",
-    "opentelemetry-exporter-prometheus>=0.65b0",
-    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
-    "opentelemetry-semantic-conventions>=0.65b0",
+    # nadia: the floors admit the 1.39/0.60 family, released together, which Hermes pins, so
+    # Nadia installs the server beside Hermes; that family's proto keeps protobuf at 6.x.
+    "opentelemetry-api>=1.39.0",
+    "opentelemetry-sdk>=1.39.0",
+    "opentelemetry-instrumentation-fastapi>=0.60b0",
+    "opentelemetry-exporter-prometheus>=0.60b0",
+    "opentelemetry-exporter-otlp-proto-http>=1.39.0",
+    "opentelemetry-semantic-conventions>=0.60b0",
     "dateparser>=1.4.2",
     # Transitive via dateparser, pinned here because the floor is load-bearing:
     # 2025.11.3 turns concurrent entry into dateparser's locale caches into a SIGSEGV
@@ -75,7 +77,7 @@ dependencies = [
     # Transitive dependency security fixes
     "pyasn1>=0.6.3", # DoS vulnerability fix
     "urllib3>=2.7.0", # Decompression-bomb safeguards bypass + sensitive header forwarding fixes
-    "protobuf>=7.35.1", # JSON recursion depth bypass fix (>=6.33.5); requires otel>=1.44 (proto <1.44 caps protobuf<7.0)
+    "protobuf>=6.33.5", # JSON recursion depth bypass fix; nadia: 6.x so the server installs beside Hermes, which pins protobuf 6
     "pillow>=12.3.0", # Multiple HIGH image parsing vulnerabilities fixed in 12.3.0
     "cryptography>=50.0.0", # GHSA-g6cj-pr64-35w5: Bleichenbacher oracle in PKCS#7 EnvelopedData decryption (supersedes the >=48.0.1 GHSA-537c-gmf6-5ccf floor). GHSA-537c-gmf6-5ccf: bundled-OpenSSL OOB read fix needs >=48.0.1. Prior <47 cap (47.0.0 SIGILL on ARM64 Docker/Podman, pyca/cryptography#14733) lifted — 47/48/49 verified importing + RSA sign/verify cleanly on linux/arm64 (Docker on Apple Silicon) and native arm64 macOS; upstream issue closed unconfirmed.
     "filelock>=3.20.1", # TOCTOU race condition fix
