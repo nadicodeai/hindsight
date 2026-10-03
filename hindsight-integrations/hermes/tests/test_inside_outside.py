@@ -299,3 +299,29 @@ def test_a_session_whose_server_moved_reaches_it_on_its_new_port(hermes_env, mon
     instance.shutdown()
 
     assert _AddressedClient.addresses == ["http://127.0.0.1:51234", "http://127.0.0.1:51235"]
+
+
+NADIA_MEMORY_RULES = {
+    "HINDSIGHT_MODE": "local_external",
+    "HINDSIGHT_INSIDE_PLATFORMS": "buzz",
+    "HINDSIGHT_RECALL_INDICATOR": "false",
+    "HINDSIGHT_RECALL_SYNC": "true",
+}
+
+
+@pytest.mark.parametrize(("pinned", "mode", "inside", "recall_sync"), [(True, "local_external", "buzz", True), (False, "cloud", "", False)])
+def test_a_profile_s_config_file_keeps_its_own_settings_but_not_those_the_managed_env_pins(
+    hermes_env, monkeypatch, pinned, mode, inside, recall_sync
+):
+    __import__("conftest").SECRETS.update(NADIA_MEMORY_RULES)
+    managed = frozenset(NADIA_MEMORY_RULES) if pinned else frozenset()
+    monkeypatch.setitem(sys.modules, "hermes_cli.env_loader", types.SimpleNamespace(managed_dotenv_keys=lambda: managed))
+    (hermes_env / "hindsight").mkdir()
+    (hermes_env / "hindsight" / "config.json").write_text(
+        json.dumps({"mode": "cloud", "recall_sync": False, "bank_id": "shared"}), encoding="utf-8"
+    )
+
+    cfg = plugin._load_config()
+
+    assert (cfg["mode"], cfg.get("inside_platforms", ""), cfg["recall_sync"]) == (mode, inside, recall_sync)
+    assert cfg["bank_id"] == "shared"

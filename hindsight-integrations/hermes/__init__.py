@@ -364,13 +364,41 @@ def _parse_platforms(value) -> frozenset:
     return frozenset(str(item).strip().lower() for item in items if str(item).strip())
 
 
+# Settings an administrator's managed .env can pin, by the config key each one fills.
+_MANAGEABLE_SETTINGS = {
+    "mode": "HINDSIGHT_MODE",
+    "retain_tags": "HINDSIGHT_RETAIN_TAGS",
+    "retain_context": "HINDSIGHT_RETAIN_CONTEXT",
+    "retain_indicator": "HINDSIGHT_RETAIN_INDICATOR",
+    "recall_indicator": "HINDSIGHT_RECALL_INDICATOR",
+    "recall_sync": "HINDSIGHT_RECALL_SYNC",
+    "inside_platforms": "HINDSIGHT_INSIDE_PLATFORMS",
+    "observation_scopes": "HINDSIGHT_RETAIN_OBSERVATION_SCOPES",
+}
+
+
+def _managed_keys() -> frozenset[str]:
+    try:
+        from hermes_cli.env_loader import managed_dotenv_keys
+    except ImportError:
+        return frozenset()
+    return managed_dotenv_keys()
+
+
 def _load_config() -> dict:
     """$HERMES_HOME/hindsight/config.json (profile-scoped), else ~/.hindsight/config.json
-    (legacy, shared), else environment variables."""
+    (legacy, shared), else environment variables. A setting the administrator's managed .env pins
+    wins over either file, so no profile's file can undo the managed memory rules."""
+    from_env = _env_config()
+    pinned = _managed_keys()
     for path in (get_hermes_home() / "hindsight" / "config.json", Path.home() / ".hindsight" / "config.json"):
         # A corrupt (or empty) file falls through to the next source, as before the dedup.
         if path.exists() and (data := read_json_or_empty(path)):
-            return data
+            return {**data, **{key: from_env[key] for key, name in _MANAGEABLE_SETTINGS.items() if name in pinned}}
+    return from_env
+
+
+def _env_config() -> dict:
     # Mode, bank (the data partition), endpoint and retain shaping are per-profile .env values like
     # the key beside them: read through the secret scope so a multiplexed secondary never inherits
     # the default profile's bank/mode. Tuning knobs (timeouts, budget) stay process-global.
