@@ -358,6 +358,9 @@ def _build_embedded_profile_env(config: dict[str, Any], *, llm_api_key: str | No
     base_url = config.get("llm_base_url")
     if not base_url and (pooled := _pool_credential(config)) is not None:
         base_url = pooled[1]
+        # Embeddings take the login's key too (the server falls back to the LLM key), so they go to its gateway.
+        if base_url:
+            env_values["HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL"] = str(base_url)
     if not base_url:
         try:
             base_url = get_secret("HINDSIGHT_API_LLM_BASE_URL", "") or ""

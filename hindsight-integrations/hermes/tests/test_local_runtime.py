@@ -259,6 +259,7 @@ def test_a_named_hermes_login_supplies_the_server_key_and_address(monkeypatch):
     assert pools[0] == "nadicode"
     assert env["HINDSIGHT_API_LLM_API_KEY"] == "sk-row"
     assert env["HINDSIGHT_API_LLM_BASE_URL"] == "https://gw.example/v1"
+    assert env["HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL"] == "https://gw.example/v1"
 
 
 def test_a_login_with_no_usable_row_supplies_nothing(monkeypatch):
