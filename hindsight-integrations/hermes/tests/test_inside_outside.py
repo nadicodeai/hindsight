@@ -325,3 +325,23 @@ def test_a_profile_s_config_file_keeps_its_own_settings_but_not_those_the_manage
 
     assert (cfg["mode"], cfg.get("inside_platforms", ""), cfg["recall_sync"]) == (mode, inside, recall_sync)
     assert cfg["bank_id"] == "shared"
+
+
+@pytest.mark.parametrize(("pinned", "addresses"), [(True, ["http://127.0.0.1:51234"]), (False, ["https://memory.example.com"])])
+def test_a_managed_local_external_reaches_only_the_recorded_server_whatever_a_profile_names(
+    hermes_env, monkeypatch, pinned, addresses
+):
+    __import__("conftest").SECRETS.update({**NADIA_MEMORY_RULES, "HINDSIGHT_API_URL": "https://memory.example.com"})
+    managed = frozenset(NADIA_MEMORY_RULES) if pinned else frozenset()
+    monkeypatch.setitem(sys.modules, "hermes_cli.env_loader", types.SimpleNamespace(managed_dotenv_keys=lambda: managed))
+    _record(hermes_env, 51234)
+    instance = _recorded_provider(hermes_env, monkeypatch)
+    (hermes_env / "hindsight" / "config.json").write_text(
+        json.dumps({"mode": "local_external", "api_url": "https://memory.example.com"}), encoding="utf-8"
+    )
+    instance.initialize("session-1")
+
+    instance.handle_tool_call("long_term_memory_save", {"content": "Order 9921 to Padova"})
+    instance.shutdown()
+
+    assert _AddressedClient.addresses == addresses

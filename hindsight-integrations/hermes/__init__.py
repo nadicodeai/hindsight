@@ -1237,7 +1237,9 @@ class HindsightMemoryProvider(MemoryProvider):
     def _apply_connection_settings(self, cfg: dict) -> None:
         """Endpoint, bank and mode selectors from *cfg* (env fallbacks where documented)."""
         self._api_key = _cloud_api_key(cfg)
-        given = cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "")
+        # A managed local_external is the Installation's own server: its record is the only address.
+        own_server = self._mode == "local_external" and "HINDSIGHT_MODE" in _managed_keys()
+        given = "" if own_server else cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "")
         self._recorded = self._mode == "local_external" and not given
         if self._recorded:
             default_url = _recorded_local_url()
