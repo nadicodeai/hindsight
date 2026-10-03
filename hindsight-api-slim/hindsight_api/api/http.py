@@ -5645,7 +5645,7 @@ def _register_routes(app: FastAPI):
     )
     async def api_list(
         bank_id: str,
-        type: str | None = None,
+        type: list[str] | None = Query(default=None),
         q: str | None = None,
         consolidation_state: str | None = None,
         state: str | None = None,
@@ -5675,7 +5675,7 @@ def _register_routes(app: FastAPI):
 
         Args:
             bank_id: Memory Bank ID (from path)
-            type: Filter by fact type (world, experience, observation)
+            type: Filter by fact type (world, experience, observation); repeated, it matches any of them
             q: Search query for full-text search (searches text and context)
             consolidation_state: Filter by consolidation state for source memories
                 (world/experience). One of 'failed', 'pending', or 'done'.
@@ -5884,6 +5884,53 @@ def _register_routes(app: FastAPI):
                 raise HTTPException(status_code=404, detail=f"Memory unit '{memory_id}' not found")
             await _attach_to_memories(app.state.memory, bank_id, [data], request_context)
             return data
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            raise _internal_error(e, f"/v1/default/banks/{bank_id}/memories/{memory_id}")
+
+    @app.delete(
+        "/v1/default/banks/{bank_id}/memories/{memory_id}",
+        summary="Delete memory unit",
+        description="Delete one world or experience memory of this bank for good: the unit, its links and entity "
+        "associations, and the observations derived from it. When it was the last memory drawn from its document, "
+        "the document goes too; while other memories still come from it, the document is kept.",
+        operation_id="delete_memory",
+        tags=["Memory"],
+        status_code=204,
+    )
+    @audited("delete_memory", request_param=None)
+    async def api_delete_memory(
+        bank_id: str,
+        memory_id: str,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        """Delete one memory unit of this bank."""
+        try:
+            # The engine finds a unit by id alone, so the bank is checked here: a caller of one bank
+            # never deletes another bank's memory.
+            found = await app.state.memory.get_memory_unit(
+                bank_id=bank_id, memory_id=memory_id, request_context=request_context
+            )
+            if found is None:
+                raise HTTPException(status_code=404, detail=f"Memory unit '{memory_id}' not found")
+            result = await app.state.memory.delete_memory_unit(
+                memory_id, bank_id=bank_id, request_context=request_context
+            )
+            if not result["success"]:
+                raise HTTPException(status_code=404, detail=f"Memory unit '{memory_id}' not found")
+            document_id = found.get("document_id")
+            if document_id:
+                left = await app.state.memory.list_memory_units(
+                    bank_id=bank_id, document_id=document_id, limit=0, request_context=request_context
+                )
+                if left["total"] == 0:
+                    await app.state.memory.delete_document(document_id, bank_id, request_context=request_context)
+            return Response(status_code=204)
         except OperationValidationError as e:
             raise HTTPException(status_code=e.status_code, detail=e.reason)
         except ValueError as e:
