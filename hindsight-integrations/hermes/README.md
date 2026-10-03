@@ -199,7 +199,7 @@ Config file: `~/.hermes/hindsight/config.json`
 | Key | Default | Description |
 |-----|---------|-------------|
 | `mode` | `cloud` | `cloud`, `local_embedded`, or `local_external` |
-| `api_url` | `https://api.hindsight.vectorize.io` | API URL (cloud and local_external modes) |
+| `api_url` | `https://api.hindsight.vectorize.io`; in local_external, `http://127.0.0.1:<port>` when the root Hermes home records `memory/port`, else `http://localhost:8888` | API URL (cloud and local_external modes) |
 
 ### Memory Bank
 

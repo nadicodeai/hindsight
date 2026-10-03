@@ -137,6 +137,21 @@ _append_capability_cache: Dict[tuple[str, str | None], bool] = {}
 _append_capability_lock = threading.Lock()
 
 
+def _recorded_local_url() -> str:
+    """The memory server's address Nadia records in the root Hermes home, which every profile shares.
+
+    Nadia's services start the server on a port they record in ``<root>/memory/port``; a profile's home is
+    ``<root>/profiles/<name>``. Without a record, the upstream default.
+    """
+    home = get_hermes_home()
+    root = home.parent.parent if home.parent.name == "profiles" else home
+    try:
+        recorded = (root / "memory" / "port").read_text(encoding="utf-8").strip()
+    except OSError:
+        return _DEFAULT_LOCAL_URL
+    return f"http://127.0.0.1:{recorded}" if recorded.isdigit() else _DEFAULT_LOCAL_URL
+
+
 def _fetch_hindsight_api_version(api_url: str, api_key: str | None = None, timeout: float = 5.0) -> str | None:
     """GET ``<api_url>/version`` -> version string, or None on any failure (= legacy API)."""
     import urllib.request
@@ -1179,7 +1194,10 @@ class HindsightMemoryProvider(MemoryProvider):
     def _apply_connection_settings(self, cfg: dict) -> None:
         """Endpoint, bank and mode selectors from *cfg* (env fallbacks where documented)."""
         self._api_key = _cloud_api_key(cfg)
-        default_url = _DEFAULT_LOCAL_URL if self._mode in {"local_embedded", "local_external"} else _DEFAULT_API_URL
+        if self._mode == "local_external":
+            default_url = _recorded_local_url()
+        else:
+            default_url = _DEFAULT_LOCAL_URL if self._mode == "local_embedded" else _DEFAULT_API_URL
         self._api_url = cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "") or default_url
 
         banks = cfg_get(cfg, "banks", "hermes", default={})

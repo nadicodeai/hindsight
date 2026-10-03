@@ -3,9 +3,11 @@ Each case drives the provider through the Hermes interface and asserts which ban
 writes on the recording fake client."""
 
 import json
+import sys
 import types
 
 import hindsight_hermes as plugin
+import pytest
 from conftest import FakeClient
 
 INSIDE = {"inside_platforms": "buzz"}
@@ -196,3 +198,42 @@ def test_the_embedded_servers_llm_and_login_come_from_the_environment(hermes_env
     assert cfg["llm_provider"] == "openai"
     assert cfg["llm_model"] == "deepseek/deepseek-v4.1-flash"
     assert cfg["llm_credential_pool"] == "nadicode"
+
+
+class _AddressedClient(FakeClient):
+    addresses: list[str] = []
+
+    def __init__(self, base_url, timeout, api_key=None):
+        super().__init__()
+        _AddressedClient.addresses.append(base_url)
+
+
+@pytest.mark.parametrize(
+    ("scope", "recorded", "config", "address"),
+    [
+        (".", "51234", {}, "http://127.0.0.1:51234"),
+        ("profiles/maria", "51234", {}, "http://127.0.0.1:51234"),
+        (".", "51234", {"api_url": "http://127.0.0.1:9000"}, "http://127.0.0.1:9000"),
+        (".", None, {}, "http://localhost:8888"),
+    ],
+)
+def test_a_local_external_provider_calls_the_memory_server_the_root_home_records(
+    hermes_env, monkeypatch, scope, recorded, config, address
+):
+    if recorded is not None:
+        (hermes_env / "memory").mkdir()
+        (hermes_env / "memory" / "port").write_text(f"{recorded}\n", encoding="utf-8")
+    home = hermes_env / scope
+    (home / "hindsight").mkdir(parents=True)
+    (home / "hindsight" / "config.json").write_text(json.dumps({"mode": "local_external", **config}))
+    monkeypatch.setattr(plugin, "get_hermes_home", lambda: home)
+    monkeypatch.setattr(plugin, "_check_api_supports_update_mode_append", lambda *a, **k: True)
+    monkeypatch.setitem(sys.modules, "hindsight_client", types.SimpleNamespace(Hindsight=_AddressedClient))
+    _AddressedClient.addresses = []
+
+    instance = plugin.HindsightMemoryProvider()
+    instance.initialize("session-1")
+    instance.handle_tool_call("long_term_memory_save", {"content": "Order 9921 to Padova"})
+    instance.shutdown()
+
+    assert _AddressedClient.addresses == [address]
