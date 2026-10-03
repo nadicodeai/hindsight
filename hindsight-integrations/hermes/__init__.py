@@ -141,15 +141,16 @@ def _recorded_local_url() -> str:
     """The memory server's address Nadia records in the root Hermes home, which every profile shares.
 
     Nadia's services start the server on a port they record in ``<root>/memory/port``; a profile's home is
-    ``<root>/profiles/<name>``. Without a record, the upstream default.
+    ``<root>/profiles/<name>``. Without a record there is no address: never the upstream default, where
+    another local program may listen.
     """
     home = get_hermes_home()
     root = home.parent.parent if home.parent.name == "profiles" else home
     try:
         recorded = (root / "memory" / "port").read_text(encoding="utf-8").strip()
     except OSError:
-        return _DEFAULT_LOCAL_URL
-    return f"http://127.0.0.1:{recorded}" if recorded.isdigit() else _DEFAULT_LOCAL_URL
+        return ""
+    return f"http://127.0.0.1:{recorded}" if recorded.isdigit() else ""
 
 
 def _fetch_hindsight_api_version(api_url: str, api_key: str | None = None, timeout: float = 5.0) -> str | None:
@@ -475,6 +476,7 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def __init__(self):
         self._config = self._api_key = self._client = None
+        self._recorded = False
         self._embedded_url = None
         self._client_lock = threading.Lock()
         self._api_url, self._mode = _DEFAULT_API_URL, "cloud"
@@ -823,10 +825,22 @@ class HindsightMemoryProvider(MemoryProvider):
         logger.info("Connected to embedded Hindsight daemon at %s", self._embedded_url)
         return Hindsight(base_url=self._embedded_url)
 
+    def _current_url(self) -> str:
+        """The server's address now: a recorded one is read again, since Nadia's services may move it."""
+        if self._recorded:
+            self._api_url = _recorded_local_url()
+        return self._api_url
+
+    def _required_url(self) -> str:
+        url = self._current_url()
+        if not url:
+            raise ConnectionError("cannot connect to host: Nadia's memory server has recorded no port yet")
+        return url
+
     def _new_cloud_client(self):
         from hindsight_client import Hindsight
 
-        kwargs = {"base_url": self._api_url, "timeout": float(self._timeout or _DEFAULT_TIMEOUT)}
+        kwargs = {"base_url": self._required_url(), "timeout": float(self._timeout or _DEFAULT_TIMEOUT)}
         if self._api_key:
             kwargs["api_key"] = self._api_key
         logger.debug(
@@ -894,9 +908,10 @@ class HindsightMemoryProvider(MemoryProvider):
             return self._run_sync(operation(self._get_client()))
         except Exception as exc:
             text = f"{type(exc).__name__}: {exc}".lower()
-            if self._mode != "local_embedded" or not any(m in text for m in _RETRIABLE_CONNECTION_MARKERS):
+            restartable = self._mode == "local_embedded" or self._recorded
+            if not restartable or not any(m in text for m in _RETRIABLE_CONNECTION_MARKERS):
                 raise
-            logger.info("Hindsight embedded daemon appears unreachable; recreating client and retrying once: %s", exc)
+            logger.info("Hindsight server appears unreachable; recreating client and retrying once: %s", exc)
             self._client = None
             self._client = client = self._get_client()
             return self._run_sync(operation(client))
@@ -1053,7 +1068,7 @@ class HindsightMemoryProvider(MemoryProvider):
         resume-overwrite fix (#6654) keeps working on legacy servers.
         """
         url = self._embedded_url if self._mode == "local_embedded" else None
-        probe_url = str(url) if url else (self._api_url or "")
+        probe_url = str(url) if url else self._current_url()
         if self._session_id and _check_api_supports_update_mode_append(probe_url, self._api_key):
             return self._session_id, "append"
         return fallback_document_id, None
@@ -1176,7 +1191,7 @@ class HindsightMemoryProvider(MemoryProvider):
         """Outside people's banks whose display name contains *name*."""
         import urllib.request
 
-        request = urllib.request.Request(f"{self._api_url.rstrip('/')}/v1/default/banks")
+        request = urllib.request.Request(f"{self._required_url().rstrip('/')}/v1/default/banks")
         if self._api_key:
             request.add_header("Authorization", f"Bearer {self._api_key}")
         with urllib.request.urlopen(request, timeout=self._timeout) as resp:
@@ -1194,11 +1209,13 @@ class HindsightMemoryProvider(MemoryProvider):
     def _apply_connection_settings(self, cfg: dict) -> None:
         """Endpoint, bank and mode selectors from *cfg* (env fallbacks where documented)."""
         self._api_key = _cloud_api_key(cfg)
-        if self._mode == "local_external":
+        given = cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "")
+        self._recorded = self._mode == "local_external" and not given
+        if self._recorded:
             default_url = _recorded_local_url()
         else:
             default_url = _DEFAULT_LOCAL_URL if self._mode == "local_embedded" else _DEFAULT_API_URL
-        self._api_url = cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "") or default_url
+        self._api_url = given or default_url
 
         banks = cfg_get(cfg, "banks", "hermes", default={})
         self._bank_id_template = cfg.get("bank_id_template", "") or ""

@@ -214,7 +214,6 @@ class _AddressedClient(FakeClient):
         (".", "51234", {}, "http://127.0.0.1:51234"),
         ("profiles/maria", "51234", {}, "http://127.0.0.1:51234"),
         (".", "51234", {"api_url": "http://127.0.0.1:9000"}, "http://127.0.0.1:9000"),
-        (".", None, {}, "http://localhost:8888"),
     ],
 )
 def test_a_local_external_provider_calls_the_memory_server_the_root_home_records(
@@ -237,3 +236,66 @@ def test_a_local_external_provider_calls_the_memory_server_the_root_home_records
     instance.shutdown()
 
     assert _AddressedClient.addresses == [address]
+
+
+class _MovedClient(_AddressedClient):
+    gone: set[str] = set()
+
+    def __init__(self, base_url, timeout, api_key=None):
+        super().__init__(base_url, timeout, api_key)
+        self.base_url = base_url
+
+    async def aretain_batch(self, **kwargs):
+        if self.base_url in _MovedClient.gone:
+            raise RuntimeError(f"Cannot connect to host {self.base_url}")
+        return await super().aretain_batch(**kwargs)
+
+
+def _record(root, port):
+    (root / "memory").mkdir(exist_ok=True)
+    (root / "memory" / "port").write_text(f"{port}\n", encoding="utf-8")
+
+
+def _recorded_provider(hermes_env, monkeypatch):
+    (hermes_env / "hindsight").mkdir(exist_ok=True)
+    (hermes_env / "hindsight" / "config.json").write_text(json.dumps({"mode": "local_external"}))
+    monkeypatch.setattr(plugin, "get_hermes_home", lambda: hermes_env)
+    monkeypatch.setattr(plugin, "_check_api_supports_update_mode_append", lambda *a, **k: True)
+    monkeypatch.setitem(sys.modules, "hindsight_client", types.SimpleNamespace(Hindsight=_MovedClient))
+    _AddressedClient.addresses = []
+    _MovedClient.gone = set()
+    instance = plugin.HindsightMemoryProvider()
+    instance.initialize("session-1")
+    return instance
+
+
+def test_with_no_recorded_port_a_local_external_provider_calls_no_server(hermes_env, monkeypatch):
+    instance = _recorded_provider(hermes_env, monkeypatch)
+
+    instance.handle_tool_call("long_term_memory_save", {"content": "Order 9921 to Padova"})
+    instance.shutdown()
+
+    assert _AddressedClient.addresses == []
+
+
+def test_a_session_started_before_the_port_was_recorded_reaches_the_server_once_it_is(hermes_env, monkeypatch):
+    instance = _recorded_provider(hermes_env, monkeypatch)
+
+    _record(hermes_env, 51234)
+    instance.handle_tool_call("long_term_memory_save", {"content": "Order 9921 to Padova"})
+    instance.shutdown()
+
+    assert _AddressedClient.addresses == ["http://127.0.0.1:51234"]
+
+
+def test_a_session_whose_server_moved_reaches_it_on_its_new_port(hermes_env, monkeypatch):
+    _record(hermes_env, 51234)
+    instance = _recorded_provider(hermes_env, monkeypatch)
+    instance.handle_tool_call("long_term_memory_save", {"content": "Order 9921 to Padova"})
+
+    _MovedClient.gone = {"http://127.0.0.1:51234"}
+    _record(hermes_env, 51235)
+    instance.handle_tool_call("long_term_memory_save", {"content": "Order 9922 to Vicenza"})
+    instance.shutdown()
+
+    assert _AddressedClient.addresses == ["http://127.0.0.1:51234", "http://127.0.0.1:51235"]
