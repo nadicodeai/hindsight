@@ -3,9 +3,11 @@ Each case drives the provider through the Hermes interface and asserts which ban
 writes on the recording fake client."""
 
 import json
+import sys
 import types
 
 import hindsight_hermes as plugin
+import pytest
 from conftest import FakeClient
 
 INSIDE = {"inside_platforms": "buzz"}
@@ -196,3 +198,29 @@ def test_the_embedded_servers_llm_and_login_come_from_the_environment(hermes_env
     assert cfg["llm_provider"] == "openai"
     assert cfg["llm_model"] == "deepseek/deepseek-v4.1-flash"
     assert cfg["llm_credential_pool"] == "nadicode"
+
+
+NADIA_MEMORY_RULES = {
+    "HINDSIGHT_MODE": "local_embedded",
+    "HINDSIGHT_INSIDE_PLATFORMS": "buzz",
+    "HINDSIGHT_RECALL_INDICATOR": "false",
+    "HINDSIGHT_RECALL_SYNC": "true",
+}
+
+
+@pytest.mark.parametrize(("pinned", "mode", "inside", "recall_sync"), [(True, "local_embedded", "buzz", True), (False, "cloud", "", False)])
+def test_a_profile_s_config_file_keeps_its_own_settings_but_not_those_the_managed_env_pins(
+    hermes_env, monkeypatch, pinned, mode, inside, recall_sync
+):
+    __import__("conftest").SECRETS.update(NADIA_MEMORY_RULES)
+    managed = frozenset(NADIA_MEMORY_RULES) if pinned else frozenset()
+    monkeypatch.setitem(sys.modules, "hermes_cli.env_loader", types.SimpleNamespace(managed_dotenv_keys=lambda: managed))
+    (hermes_env / "hindsight").mkdir()
+    (hermes_env / "hindsight" / "config.json").write_text(
+        json.dumps({"mode": "cloud", "recall_sync": False, "bank_id": "shared"}), encoding="utf-8"
+    )
+
+    cfg = plugin._load_config()
+
+    assert (cfg["mode"], cfg.get("inside_platforms", ""), cfg["recall_sync"]) == (mode, inside, recall_sync)
+    assert cfg["bank_id"] == "shared"
