@@ -292,22 +292,31 @@ version = "1.2.1"
 source = { virtual = "." }
 dependencies = [
     { name = "hindsight-client" },
+]
+
+[package.optional-dependencies]
+embedded = [
     { name = "hindsight-embed" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "hindsight-embed" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "hindsight-client", specifier = ">=0.10.1,<1" },
-    { name = "hindsight-embed", specifier = "==0.10.2+nadia.2" },
+    { name = "hindsight-embed", marker = "extra == 'embedded'", specifier = "==0.10.2+nadia.2" },
 ]
+provides-extras = ["embedded"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0" }]
+dev = [
+    { name = "hindsight-embed", specifier = "==0.10.2+nadia.2" },
+    { name = "pytest", specifier = ">=8.0" },
+]
 
 [[package]]
 name = "hindsight-client"

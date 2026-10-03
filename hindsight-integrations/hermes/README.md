@@ -336,10 +336,12 @@ by setting the same flags back to `true`.
 Check `hermes memory status` reports `hindsight` as the active provider and `Status: available`. In
 `memory_mode: context` the tools are hidden on purpose.
 
-**`Status: not available` in `local_embedded`** — this plugin's own packages
-(`hindsight-client`, `hindsight-embed`) are missing from the environment, which happens when a venv
-rebuild dropped the plugin member. Run `hermes pm repair` and restart Hermes to rebuild them. The Hindsight server is *not* needed in that venv — it runs as a separate
-process, and first use downloads it if no `hindsight-api` binary is present yet.
+**`Status: not available` in `local_embedded`** — `hindsight-client`, this plugin's dependency,
+was dropped by a venv rebuild: run `hermes pm repair` and restart Hermes. Or `hindsight-embed`, the
+plugin's `embedded` extra, is not installed: Hermes' package manager installs dependencies, not
+extras, so install it into Hermes' environment yourself, or run a server and use `local_external`.
+The Hindsight server is *not* needed in that venv — it runs as a separate process, and first use
+downloads it if no `hindsight-api` binary is present yet.
 
 **`Timeout context manager should be used inside a task`** — `hindsight-embed` 0.10.0. Run
 `hermes plugins update hindsight` to move to the 0.10.1 floor.
