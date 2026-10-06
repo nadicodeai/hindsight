@@ -348,3 +348,19 @@ def test_a_login_with_no_usable_row_supplies_nothing(monkeypatch):
 def test_the_profile_env_follows_embeds_home(monkeypatch, tmp_path):
     monkeypatch.setenv("HINDSIGHT_EMBED_HOME", str(tmp_path))
     assert embedded._embedded_profile_env_path({"profile": "nadia"}) == tmp_path / "profiles" / "nadia.env"
+
+
+def test_a_login_gateway_is_owned_so_it_is_not_drift_and_a_rewrite_drops_it_when_gone(monkeypatch, hermes_env):
+    """The embeddings gateway a login names is the plugin's key: unchanged it is no drift, and once no
+    login names it a rewrite removes it, so the next key is never sent to the old login's gateway."""
+    _pool_named(monkeypatch, SimpleNamespace(runtime_api_key="sk-row", runtime_base_url="https://gw.example/v1"))
+    cfg = {"profile": "hermes", "llm_credential_pool": "nadicode", "llm_provider": "openai", "llm_model": "m"}
+    embedded._materialize_embedded_profile_env(cfg)
+    path = embedded._embedded_profile_env_path(cfg)
+    assert embedded._load_simple_env(path)["HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL"] == "https://gw.example/v1"
+    assert embedded._profile_env_drifted(cfg) is False
+
+    _pool_named(monkeypatch, SimpleNamespace(runtime_api_key="sk-other", runtime_base_url=""))
+    assert embedded._profile_env_drifted(cfg) is True
+    embedded._materialize_embedded_profile_env(cfg)
+    assert "HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL" not in embedded._load_simple_env(path)
