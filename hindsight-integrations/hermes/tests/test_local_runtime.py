@@ -402,3 +402,31 @@ def test_a_database_set_in_the_profile_env_by_hand_survives_a_rewrite(hermes_env
 def test_a_default_deployment_names_no_database(hermes_env):
     """No URL anywhere leaves the daemon on its own pg0, as before."""
     assert "HINDSIGHT_EMBED_API_DATABASE_URL" not in embedded._build_embedded_profile_env(_CFG)
+
+
+def _pool_named(monkeypatch, entry):
+    pools = []
+    module = SimpleNamespace(load_pool=lambda name: pools.append(name) or SimpleNamespace(select=lambda: entry))
+    monkeypatch.setitem(sys.modules, "agent.credential_pool", module)
+    return pools
+
+
+def test_a_named_hermes_login_supplies_the_server_key_and_address(monkeypatch):
+    pools = _pool_named(monkeypatch, SimpleNamespace(runtime_api_key="sk-row", runtime_base_url="https://gw.example/v1"))
+    env = embedded._build_embedded_profile_env(
+        {"llm_credential_pool": "nadicode", "llm_provider": "openai", "llm_model": "m"}
+    )
+    assert pools[0] == "nadicode"
+    assert env["HINDSIGHT_API_LLM_API_KEY"] == "sk-row"
+    assert env["HINDSIGHT_API_LLM_BASE_URL"] == "https://gw.example/v1"
+
+
+def test_a_login_with_no_usable_row_supplies_nothing(monkeypatch):
+    _pool_named(monkeypatch, None)
+    assert embedded._pool_credential({"llm_credential_pool": "nadicode"}) is None
+    assert embedded._pool_credential({}) is None
+
+
+def test_the_profile_env_follows_embeds_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("HINDSIGHT_EMBED_HOME", str(tmp_path))
+    assert embedded._embedded_profile_env_path({"profile": "nadia"}) == tmp_path / "profiles" / "nadia.env"
