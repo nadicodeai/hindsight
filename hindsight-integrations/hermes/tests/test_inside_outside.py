@@ -58,6 +58,13 @@ def test_no_sender_is_the_owner_and_inside(provider):
     assert _searched(fake) == ["person-owner", "company", "public"]
 
 
+def test_a_chat_in_the_owners_own_window_is_the_owner_and_inside(provider):
+    instance, fake = provider(INSIDE, platform="desktop", user_id="uid:1000")
+    instance.handle_tool_call("long_term_memory_search", {"query": "anything"})
+    instance.shutdown()
+    assert _searched(fake) == ["person-owner", "company", "public"]
+
+
 def test_the_turn_is_saved_in_the_senders_own_memory(provider):
     instance, fake = provider(INSIDE, platform="telegram", user_id="777", user_name="Bianchi")
     instance.sync_turn("I'm Bianchi", "Hello.")

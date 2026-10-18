@@ -350,6 +350,7 @@ def _bank_not_written_yet(exc: Exception) -> bool:
 TEAM_BANK = "company"
 PUBLIC_BANK = "public"
 OWNER = "owner"
+OWN_WINDOW = "desktop"
 _SAVE_TARGETS = {"team": TEAM_BANK, "everyone": PUBLIC_BANK}
 _BANK_LABELS = {TEAM_BANK: "the team's knowledge", PUBLIC_BANK: "public knowledge"}
 
@@ -1281,7 +1282,7 @@ class HindsightMemoryProvider(MemoryProvider):
             self._person, self._inside = "", True
             self._read_banks = [self._bank_id]
             return
-        if not self._user_id:
+        if not self._user_id or self._platform.lower() == OWN_WINDOW:
             self._person, self._inside = OWNER, True
         else:
             self._person = f"{self._platform}-{self._user_id}"
