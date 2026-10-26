@@ -90,7 +90,8 @@ def test_recall_tool_queries_the_bank_and_formats_results(provider):
 
     assert fake.recalls[0]["bank_id"] == "team"
     assert fake.recalls[0]["budget"] == "high"
-    assert fake.recalls[0]["types"] == ["observation"]  # observation-only default
+    assert fake.recalls[0]["types"] == ["world", "experience", "observation"]  # every type by default
+    assert fake.recalls[0]["prefer_observations"] is True
     assert result["result"] == "1. fact one\n2. fact two"
     instance.shutdown()
 

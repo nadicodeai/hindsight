@@ -411,8 +411,12 @@ def _bank_not_written_yet(exc: Exception) -> bool:
 TEAM_BANK = "company"
 PUBLIC_BANK = "public"
 OWNER = "owner"
+OWN_WINDOW = "desktop"
 _SAVE_TARGETS = {"team": TEAM_BANK, "everyone": PUBLIC_BANK}
 _BANK_LABELS = {TEAM_BANK: "the team's knowledge", PUBLIC_BANK: "public knowledge"}
+
+
+_RECALL_TYPES = ("world", "experience", "observation")
 
 
 def _person_bank(person: str) -> str:
@@ -559,9 +563,14 @@ class HindsightMemoryProvider(MemoryProvider):
     _RETAIN_OP_POLL_INTERVAL_S = 0.5
 
     def backup_paths(self) -> List[str]:
-        """Legacy shared config + embedded-mode profile env files live under ~/.hindsight."""
+        """Legacy shared config + embedded-mode profile env files live under ~/.hindsight, and the
+        Agents' folders under terminal.workspace_root (the company wiki among them), which only the
+        memory provider can add to ``hermes backup``."""
         with contextlib.suppress(Exception):
-            return [str(Path.home() / ".hindsight")]
+            from hermes_cli.config import load_config
+
+            workspace = cfg_get(load_config(), "terminal", "workspace_root")
+            return [str(Path.home() / ".hindsight"), *([str(Path(str(workspace)).expanduser())] if workspace else [])]
         return []
 
     def __init__(self):
@@ -838,8 +847,8 @@ class HindsightMemoryProvider(MemoryProvider):
             },
             {
                 "key": "recall_types",
-                "description": "Fact types to surface on recall — applies to both auto-recall and the long_term_memory_search tool (comma-separated or list). Defaults to observation-only — observations are Hindsight's consolidated, deduplicated, evidence-grounded knowledge layer; raw world/experience facts are the supporting evidence observations already summarize. Set to e.g. 'observation,world,experience' to also include raw facts.",
-                "default": "observation",
+                "description": "Fact types to surface on recall — applies to both auto-recall and the long_term_memory_search tool (comma-separated or list). Defaults to every type, as Hindsight's own recall does, with prefer_observations: a raw world/experience fact is recalled as soon as it is retained, and once an observation consolidates it the observation takes its place. Set to e.g. 'observation' to recall consolidated observations only.",
+                "default": "world,experience,observation",
             },
             {
                 "key": "recall_min_scores",
@@ -1387,7 +1396,7 @@ class HindsightMemoryProvider(MemoryProvider):
             self._person, self._inside = "", True
             self._read_banks = [self._bank_id]
             return
-        if not self._user_id:
+        if not self._user_id or self._platform.lower() == OWN_WINDOW:
             self._person, self._inside = OWNER, True
         else:
             self._person = f"{self._platform}-{self._user_id}"
@@ -1539,15 +1548,15 @@ class HindsightMemoryProvider(MemoryProvider):
         self._recall_sync = bool(cfg.get("recall_sync", False))
         self._recall_max_tokens = _parse_int_setting(cfg.get("recall_max_tokens"), 4096)
         self._recall_max_input_chars = _parse_int_setting(cfg.get("recall_max_input_chars"), 800)
-        # None -> observation-only (Hindsight's consolidated, deduplicated layer; raw
-        # world/experience facts re-ship the evidence they summarize and burn the
-        # recall_max_tokens budget); a comma-separated string is accepted for parity
-        # with recall_tags; an explicit list broadens or disables the filter.
+        # None -> every type, Hindsight's own recall default, with prefer_observations so an
+        # observation replaces the raw facts it consolidated: a fact is recallable from its
+        # retain on, whether or not its consolidation ever succeeds; a comma-separated string
+        # is accepted for parity with recall_tags; an explicit list narrows the filter.
         configured_types = cfg.get("recall_types")
         if isinstance(configured_types, str):
             self._recall_types = [t.strip() for t in configured_types.split(",") if t.strip()]
         else:
-            self._recall_types = list([] if configured_types is None else configured_types) or ["observation"]
+            self._recall_types = list([] if configured_types is None else configured_types) or list(_RECALL_TYPES)
         self._recall_min_scores = _normalize_min_scores(cfg.get("recall_min_scores"))
         self._recall_prompt_preamble = cfg.get("recall_prompt_preamble", "")
         self._recall_indicator = bool(cfg.get("recall_indicator", True))
@@ -1677,6 +1686,7 @@ class HindsightMemoryProvider(MemoryProvider):
             kwargs.update(tags=self._recall_tags, tags_match=self._recall_tags_match)
         if self._recall_types:
             kwargs["types"] = self._recall_types
+            kwargs["prefer_observations"] = "observation" in self._recall_types and len(self._recall_types) > 1
         if self._recall_min_scores:
             kwargs["min_scores"] = self._recall_min_scores
 
