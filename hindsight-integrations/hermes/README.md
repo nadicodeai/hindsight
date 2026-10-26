@@ -346,7 +346,7 @@ recalls everything in a chat without topics. Values are used as they are, not cl
 | `recall_exclude_tags` | — | Tags to keep out of recall (auto-recall and the `long_term_memory_search` tool), as a JSON list or comma-separated text (e.g. `"draft, scratch"`). A memory carrying any of them is skipped but stays in the bank; untagged memories and other tags are unaffected. Combines with `recall_tags`; does not apply to reflect. Accepts the [tag placeholders](#tag-placeholders). |
 | `reflect_tags` | — | Tags that scope what reflect reasons over (the `long_term_memory_reflect` tool and `recall_prefetch_method: reflect`), as a JSON list or comma-separated text. Unset, reflect uses the whole bank; `recall_tags` does not apply to reflect. Accepts the [tag placeholders](#tag-placeholders). |
 | `reflect_tags_match` | `any` | Tag matching mode for `reflect_tags` |
-| `recall_types` | `observation` | Fact types surfaced by recall (both auto-recall and the `long_term_memory_search` tool). Comma-separated string or JSON list. **Default narrowed to `observation` only** (see "Behavior change" below). Set to `observation,world,experience` to also include raw facts. |
+| `recall_types` | `world,experience,observation` | Fact types surfaced by recall (both auto-recall and the `long_term_memory_search` tool). Comma-separated string or JSON list. Defaults to every type, as Hindsight's own recall does, with `prefer_observations` (see "Recall types" below). Set to `observation` to recall consolidated observations only. |
 | `recall_min_scores` | — | Minimum relevance per score field, as a JSON object (e.g. `{"reranker": 0.25}` or `{"semantic": 0.5}`). Applies to both auto-recall and the `long_term_memory_search` tool. See the tip below. |
 | `auto_recall` | `true` | Automatically recall memories before each turn |
 | `recall_cron` | `false` | Also auto-recall in scheduled (cron) runs. Off by default: Hermes starts every cron prompt with a fixed notice longer than `recall_max_input_chars`, so the recall would search for that notice instead of the job and inject unrelated memories. The `long_term_memory_search` and `long_term_memory_reflect` tools still work in cron runs. |
@@ -355,13 +355,9 @@ recalls everything in a chat without topics. Values are used as they are, not cl
 
 Each recalled memory, in auto-recall and in the `long_term_memory_search` tool, carries its dates so the model can tell an old fact from a fresh one: `- <text> (mentioned: 2026-10-18) [occurred: 2026-09-01 → 2026-09-03]`. `mentioned` is when the fact was stated, `occurred` is when the event itself happened. Dates are shown in Hermes' configured timezone; a memory without a date shows none.
 
-> **Behavior change — `recall_types` defaults to `observation` only.**
+> **Recall types.** Recall asks for every fact type, as Hindsight's own recall does by default, with `prefer_observations`: a raw `world` / `experience` fact is recalled as soon as it is retained, and once an [observation](https://hindsight.vectorize.io/developer/observations) consolidates it, the observation is returned in its place. A fact whose consolidation has not run yet, or failed, is still recalled.
 >
-> Previously recall returned all three fact types. It now returns only observations.
->
-> Per [Hindsight's docs](https://hindsight.vectorize.io/developer/observations), observations are the **consolidated** knowledge layer Hindsight builds on top of raw facts: deduplicated beliefs grounded in evidence, refined as new facts arrive, with proof counts and freshness signals. Raw `world` / `experience` facts are the individual supporting evidence that feeds them. For per-turn context injection, observations are denser per token and avoid feeding the model multiple raw facts that one observation already summarizes.
->
-> Restore the broad recall with `"recall_types": "observation,world,experience"` (string or JSON list) in `~/.hermes/hindsight/config.json`. This applies to **both** auto-recall and the `long_term_memory_search` tool — both read the same `recall_types` setting (the tool schema has no per-call `types` argument), so narrowing the default narrows both paths.
+> Narrow it with `"recall_types": "observation"` (string or JSON list) in `~/.hermes/hindsight/config.json`. This applies to **both** auto-recall and the `long_term_memory_search` tool, which read the same setting.
 
 > **Tip — `recall_min_scores` against off-topic recall.** Recall ranks, it does not judge relevance: a question
 > unrelated to anything stored still comes back with up to `recall_max_tokens` of the least-bad memories. The
