@@ -208,3 +208,19 @@ async def test_delete_removes_one_memory_of_its_bank_for_good_and_no_other_bank_
     pool = await memory._get_pool()
     async with pool.acquire() as conn:
         assert await conn.fetchval("SELECT count(*) FROM memory_units WHERE id = $1", uuid.UUID(gone)) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
+async def test_a_listed_memory_carries_when_it_was_stored_even_when_no_mention_time_was_given(api_client, memory):
+    bank_id = f"curation-http-{uuid.uuid4().hex[:8]}"
+    stored = await _insert_fact(memory, bank_id, "Anna's client code is AC-4471.")
+
+    listed = (await api_client.get(f"/v1/default/banks/{bank_id}/memories/list")).json()["items"]
+
+    pool = await memory._get_pool()
+    async with pool.acquire() as conn:
+        created = await conn.fetchval("SELECT created_at FROM memory_units WHERE id = $1", uuid.UUID(stored))
+    assert [(item["id"], item["mentioned_at"], item["created_at"]) for item in listed] == [
+        (stored, None, created.isoformat())
+    ]
