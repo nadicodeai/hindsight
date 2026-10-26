@@ -1120,7 +1120,8 @@ class HindsightMemoryProvider(MemoryProvider):
         except Exception as exc:
             logger.debug("Prefetch: operation status check failed for %s: %s", op_id, exc)
             return False
-        return str(getattr(resp, "status", "") or "").lower() in {"completed", "failed"}
+        # The server answers 200 with "not_found" for an op it no longer holds; a cancelled op never completes.
+        return str(getattr(resp, "status", "") or "").lower() in {"completed", "failed", "cancelled", "not_found"}
 
     def _wait_for_retains_drained(self, timeout: float) -> bool:
         """Block up to *timeout* s for the last retain to become recall-visible
