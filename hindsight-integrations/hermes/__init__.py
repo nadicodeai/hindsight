@@ -1232,7 +1232,8 @@ class HindsightMemoryProvider(MemoryProvider):
                 logger.debug("Hindsight retain op status check failed for %s: %s", op_id, exc)
                 break
             status = str(getattr(resp, "status", "") or "").lower()
-            if status in {"completed", "cancelled"}:
+            # The server answers 200 with "not_found" for an op it no longer holds, as a 404 would say.
+            if status in {"completed", "cancelled", "not_found"}:
                 settled.append((bank_id, op_id))
             elif status == "failed":
                 settled.append((bank_id, op_id))
@@ -1273,7 +1274,8 @@ class HindsightMemoryProvider(MemoryProvider):
         except Exception as exc:
             logger.debug("Prefetch: operation status check failed for %s: %s", op_id, exc)
             return False
-        return str(getattr(resp, "status", "") or "").lower() in {"completed", "failed"}
+        # The server answers 200 with "not_found" for an op it no longer holds; a cancelled op never completes.
+        return str(getattr(resp, "status", "") or "").lower() in {"completed", "failed", "cancelled", "not_found"}
 
     def _wait_for_retains_drained(self, timeout: float) -> bool:
         """Block up to *timeout* s for the last retain to become recall-visible

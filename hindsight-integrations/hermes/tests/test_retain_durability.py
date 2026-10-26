@@ -161,3 +161,17 @@ def test_a_bank_without_document_text_stops_getting_appends(provider):
     # Later turns use the non-append path: a per-process document, rewritten whole each time.
     assert "update_mode" not in later["items"][0]
     assert later["document_id"] == instance._document_id
+
+
+def test_an_operation_the_server_no_longer_holds_is_settled(provider):
+    """The status endpoint answers 200 with "not_found" for an operation it no longer holds; it never
+    ends, so it is not checked again before every later write."""
+    client = FlakyClient(op_status="not_found")
+    instance, _ = provider({"prefetch_waits_for_retain": False}, client=client)
+    instance.sync_turn("first", "one")
+    instance._retain_queue.join()
+    instance.sync_turn("second", "two")
+    instance.shutdown()
+
+    assert client.retried == []
+    assert len(instance._unsettled_retain_ops) <= 1
