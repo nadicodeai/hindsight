@@ -326,3 +326,15 @@ def test_a_spool_file_is_sent_by_one_session_only(provider, hermes_env):
 
     assert [c[0] for c in _contents(first.retains + second.retains)] == ["User: left over"]
     assert not list((hermes_env / "hindsight" / "unsent-retains").iterdir())
+def test_an_operation_the_server_no_longer_holds_is_settled(provider):
+    """The status endpoint answers 200 with "not_found" for an operation it no longer holds; it never
+    ends, so it is not checked again before every later write."""
+    client = FlakyClient(op_status="not_found")
+    instance, _ = provider({"prefetch_waits_for_retain": False}, client=client)
+    instance.sync_turn("first", "one")
+    instance._retain_queue.join()
+    instance.sync_turn("second", "two")
+    instance.shutdown()
+
+    assert client.retried == []
+    assert len(instance._unsettled_retain_ops) <= 1

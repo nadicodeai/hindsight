@@ -1429,3 +1429,20 @@ def test_session_context_skipped_while_the_embedded_daemon_is_down(provider, mon
     monkeypatch.setattr(plugin, "_daemon_is_running", lambda profile: False)
     assert "Session Context" not in instance.system_prompt_block()
     assert client.reads == []
+@pytest.mark.parametrize(
+    ("status", "done"),
+    [("pending", False), ("completed", True), ("failed", True), ("cancelled", True), ("not_found", True)],
+)
+def test_a_retain_op_the_server_finished_cancelled_or_forgot_is_no_longer_awaited(provider, status, done):
+    """The server answers 200 with status 'not_found' for an operation it no longer holds, and
+    'cancelled' for one cancelled; neither will ever complete, so the prefetch must not wait on it."""
+
+    class _Operations:
+        async def get_operation_status(self, **kwargs):
+            return SimpleNamespace(status=status)
+
+    class _Client(FakeClient):
+        operations = _Operations()
+
+    instance, _ = provider({}, client=_Client())
+    assert instance._is_retain_op_complete("hermes", "op-1") is done
