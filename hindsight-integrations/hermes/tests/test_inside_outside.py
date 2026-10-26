@@ -208,13 +208,17 @@ NADIA_MEMORY_RULES = {
 }
 
 
-@pytest.mark.parametrize(("pinned", "mode", "inside", "recall_sync"), [(True, "local_embedded", "buzz", True), (False, "cloud", "", False)])
+@pytest.mark.parametrize(
+    ("pinned", "mode", "inside", "recall_sync"), [(True, "local_embedded", "buzz", True), (False, "cloud", "", False)]
+)
 def test_a_profile_s_config_file_keeps_its_own_settings_but_not_those_the_managed_env_pins(
     hermes_env, monkeypatch, pinned, mode, inside, recall_sync
 ):
     __import__("conftest").SECRETS.update(NADIA_MEMORY_RULES)
     managed = frozenset(NADIA_MEMORY_RULES) if pinned else frozenset()
-    monkeypatch.setitem(sys.modules, "hermes_cli.env_loader", types.SimpleNamespace(managed_dotenv_keys=lambda: managed))
+    monkeypatch.setitem(
+        sys.modules, "hermes_cli.env_loader", types.SimpleNamespace(managed_dotenv_keys=lambda: managed)
+    )
     (hermes_env / "hindsight").mkdir()
     (hermes_env / "hindsight" / "config.json").write_text(
         json.dumps({"mode": "cloud", "recall_sync": False, "bank_id": "shared"}), encoding="utf-8"
@@ -224,3 +228,28 @@ def test_a_profile_s_config_file_keeps_its_own_settings_but_not_those_the_manage
 
     assert (cfg["mode"], cfg.get("inside_platforms", ""), cfg["recall_sync"]) == (mode, inside, recall_sync)
     assert cfg["bank_id"] == "shared"
+
+
+def test_the_name_lookup_reads_every_page_of_banks(provider, monkeypatch):
+    instance, _ = provider(INSIDE, platform="buzz", user_id="ab12")
+    people = [{"bank_id": f"person-whatsapp-{n}", "name": f"Person {n}"} for n in range(150)]
+    people[149]["name"] = "Giulia Rossi"
+
+    class _Resp:
+        def __init__(self, url):
+            query = dict(part.split("=") for part in url.split("?", 1)[1].split("&"))
+            offset, limit = int(query["offset"]), int(query["limit"])
+            self.body = {"banks": people[offset : offset + limit], "total": len(people)}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps(self.body).encode()
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, **k: _Resp(request.full_url))
+    assert instance._outside_banks_named("rossi") == ["person-whatsapp-149"]
+    instance.shutdown()

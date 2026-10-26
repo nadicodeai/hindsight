@@ -417,6 +417,7 @@ _BANK_LABELS = {TEAM_BANK: "the team's knowledge", PUBLIC_BANK: "public knowledg
 
 
 _RECALL_TYPES = ("world", "experience", "observation")
+_BANKS_PER_PAGE = 100
 
 
 def _person_bank(person: str) -> str:
@@ -1421,11 +1422,19 @@ class HindsightMemoryProvider(MemoryProvider):
         """Outside people's banks whose display name contains *name*."""
         import urllib.request
 
-        request = urllib.request.Request(f"{self._api_url.rstrip('/')}/v1/default/banks")
-        if self._api_key:
-            request.add_header("Authorization", f"Bearer {self._api_key}")
-        with urllib.request.urlopen(request, timeout=self._timeout) as resp:
-            banks = json.load(resp).get("banks", [])
+        banks: list = []
+        while True:
+            request = urllib.request.Request(
+                f"{self._api_url.rstrip('/')}/v1/default/banks?limit={_BANKS_PER_PAGE}&offset={len(banks)}"
+            )
+            if self._api_key:
+                request.add_header("Authorization", f"Bearer {self._api_key}")
+            with urllib.request.urlopen(request, timeout=self._timeout) as resp:
+                listed = json.load(resp)
+            page = listed.get("banks", [])
+            banks.extend(page)
+            if not page or len(banks) >= int(listed.get("total", 0)):
+                break
         inside = (_person_bank(OWNER), *(f"person-{p}-" for p in self._inside_platforms))
         wanted = name.casefold()
         return [
