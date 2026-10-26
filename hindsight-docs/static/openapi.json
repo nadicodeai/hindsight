@@ -15282,6 +15282,18 @@
             "title": "Mentioned At",
             "description": "When the memory was mentioned (ISO 8601)"
           },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "description": "When the memory was stored (ISO 8601)"
+          },
           "occurred_start": {
             "anyOf": [
               {

@@ -239,7 +239,7 @@ async def list_memory_units(
         SELECT id, text, event_date, context, fact_type, document_id,
                mentioned_at, occurred_start, occurred_end, chunk_id, proof_count,
                tags, metadata, consolidated_at, consolidation_failed_at, edited_at,
-               updated_at, source_memory_ids, {curation_cols}
+               updated_at, created_at, source_memory_ids, {curation_cols}
         FROM {source_table}
         {where_clause}
         ORDER BY {window.order_by or "mentioned_at DESC NULLS LAST, created_at DESC, id"}
@@ -290,6 +290,7 @@ async def list_memory_units(
                 "mentioned_at": row["mentioned_at"].isoformat() if row["mentioned_at"] else None,
                 "occurred_start": row["occurred_start"].isoformat() if row["occurred_start"] else None,
                 "occurred_end": row["occurred_end"].isoformat() if row["occurred_end"] else None,
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                 "entities": ", ".join(entities) if entities else "",
                 "chunk_id": row["chunk_id"] if row["chunk_id"] else None,
                 "proof_count": row["proof_count"] if row["proof_count"] is not None else 1,

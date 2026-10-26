@@ -2441,6 +2441,7 @@ class MemoryUnitListItem(OpenRowModel):
     fact_type: str | None = Field(default=None, description="Fact type: world, experience or observation")
     document_id: str | None = Field(default=None, description="Source document ID")
     mentioned_at: str | None = Field(default=None, description="When the memory was mentioned (ISO 8601)")
+    created_at: str | None = Field(default=None, description="When the memory was stored (ISO 8601)")
     occurred_start: str | None = Field(default=None, description="Start of the event interval (ISO 8601)")
     occurred_end: str | None = Field(default=None, description="End of the event interval (ISO 8601)")
     entities: str = Field(default="", description="Comma-separated canonical entity names")
