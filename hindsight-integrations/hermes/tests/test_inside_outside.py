@@ -234,11 +234,13 @@ def test_the_name_lookup_reads_every_page_of_banks(provider, monkeypatch):
     instance, _ = provider(INSIDE, platform="buzz", user_id="ab12")
     people = [{"bank_id": f"person-whatsapp-{n}", "name": f"Person {n}"} for n in range(150)]
     people[149]["name"] = "Giulia Rossi"
+    asked = []
 
     class _Resp:
         def __init__(self, url):
             query = dict(part.split("=") for part in url.split("?", 1)[1].split("&"))
             offset, limit = int(query["offset"]), int(query["limit"])
+            asked.append(query["q"])
             self.body = {"banks": people[offset : offset + limit], "total": len(people)}
 
         def __enter__(self):
@@ -252,4 +254,5 @@ def test_the_name_lookup_reads_every_page_of_banks(provider, monkeypatch):
 
     monkeypatch.setattr("urllib.request.urlopen", lambda request, **k: _Resp(request.full_url))
     assert instance._outside_banks_named("rossi") == ["person-whatsapp-149"]
+    assert set(asked) == {"rossi"}
     instance.shutdown()

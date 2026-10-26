@@ -1420,13 +1420,13 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _outside_banks_named(self, name: str) -> list:
         """Outside people's banks whose display name contains *name*."""
+        import urllib.parse
         import urllib.request
 
         banks: list = []
         while True:
-            request = urllib.request.Request(
-                f"{self._api_url.rstrip('/')}/v1/default/banks?limit={_BANKS_PER_PAGE}&offset={len(banks)}"
-            )
+            query = urllib.parse.urlencode({"q": name, "limit": _BANKS_PER_PAGE, "offset": len(banks)})
+            request = urllib.request.Request(f"{self._api_url.rstrip('/')}/v1/default/banks?{query}")
             if self._api_key:
                 request.add_header("Authorization", f"Bearer {self._api_key}")
             with urllib.request.urlopen(request, timeout=self._timeout) as resp:
