@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -348,9 +349,10 @@ _FOR_PROPERTY = {
     "type": "string",
     "enum": ["me", "team", "everyone"],
     "description": (
-        "Who this memory is for. 'me' (default): about the person you are talking to. 'team': "
-        "internal company knowledge, for the company's own people only. 'everyone': company facts "
-        "anyone may know, such as opening hours, addresses and products."
+        "Who this memory is for. 'everyone': company facts anyone may know, such as opening hours, "
+        "addresses and products. Otherwise ('me', the default, or 'team') it is kept where this "
+        "conversation's memory is: the company's own memory for the company's people, this person's "
+        "own for anyone else."
     ),
 }
 
@@ -403,11 +405,12 @@ def _bank_not_written_yet(exc: Exception) -> bool:
     return getattr(exc, "status", None) == 404
 
 
-# Inside and outside: when ``inside_platforms`` is set, memory belongs to people and to the
-# company instead of to one bank. Each person has their own bank; inside people (on an inside
-# platform, or with no sender at all: the owner at a terminal or a scheduled task) also read
-# the team's and the public knowledge, and may add to them on purpose; everyone else reads
-# only their own memory and the public knowledge.
+# Inside and outside: when ``inside_platforms`` is set, memory belongs to the company and to the
+# people outside it instead of to one bank. What the company's own people say (on an inside
+# platform, or with no sender at all: the owner at a terminal or a scheduled task) is the
+# company's memory, which every inside conversation reads, labelled with who said it and to
+# which agent; each outside person has a bank of their own, and reads only it and the public
+# knowledge, which inside people add to on purpose.
 TEAM_BANK = "company"
 PUBLIC_BANK = "public"
 OWNER = "owner"
@@ -418,6 +421,10 @@ _BANK_LABELS = {TEAM_BANK: "the team's knowledge", PUBLIC_BANK: "public knowledg
 
 _RECALL_TYPES = ("world", "experience", "observation")
 _BANKS_PER_PAGE = 100
+
+
+def _titled(name: str) -> str:
+    return " ".join(part.capitalize() for part in re.split(r"[-_\s]+", name or "") if part)
 
 
 def _person_bank(person: str) -> str:
@@ -474,6 +481,9 @@ def _env_config() -> dict:
         "idle_timeout": _parse_int_setting(os.environ.get("HINDSIGHT_IDLE_TIMEOUT"), _DEFAULT_IDLE_TIMEOUT),
         "retain_tags": get_secret("HINDSIGHT_RETAIN_TAGS", "") or "",
         "inside_platforms": get_secret("HINDSIGHT_INSIDE_PLATFORMS", "") or "",
+        "company_name": get_secret("HINDSIGHT_COMPANY_NAME", "") or "",
+        "owner_name": get_secret("HINDSIGHT_OWNER_NAME", "") or "",
+        "agent_name": get_secret("HINDSIGHT_AGENT_NAME", "") or "",
         # local_embedded's server: its LLM, and the Hermes login whose key and address it uses.
         "llm_provider": get_secret("HINDSIGHT_LLM_PROVIDER", "") or "",
         "llm_model": get_secret("HINDSIGHT_LLM_MODEL", "") or "",
@@ -1397,14 +1407,22 @@ class HindsightMemoryProvider(MemoryProvider):
             self._person, self._inside = "", True
             self._read_banks = [self._bank_id]
             return
-        if not self._user_id or self._platform.lower() == OWN_WINDOW:
+        owner = not self._user_id or self._platform.lower() == OWN_WINDOW
+        if owner:
             self._person, self._inside = OWNER, True
         else:
             self._person = f"{self._platform}-{self._user_id}"
             self._inside = self._platform.lower() in self._inside_platforms
-        self._bank_id = _person_bank(self._person)
+        self._company = str(cfg.get("company_name") or "").strip() or "the company"
+        self._speaker = (
+            str(cfg.get("owner_name") or "").strip() or "the company's owner"
+            if owner
+            else self._user_name or self._user_id
+        )
+        self._agent_name = str(cfg.get("agent_name") or "").strip() or _titled(self._agent_identity) or "the agent"
+        self._bank_id = TEAM_BANK if self._inside else _person_bank(self._person)
         self._write_bank_ids = [self._bank_id]
-        self._read_banks = [self._bank_id] + ([TEAM_BANK, PUBLIC_BANK] if self._inside else [PUBLIC_BANK])
+        self._read_banks = [self._bank_id, PUBLIC_BANK]
         logger.info("Memory: person=%s inside=%s reads=%s", self._person, self._inside, ",".join(self._read_banks))
 
     def _bank_label(self, bank: str) -> str:
@@ -1850,13 +1868,35 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _build_turn_messages(self, user_content: str, assistant_content: str) -> List[Dict[str, str]]:
         now = _event_timestamp()  # one turn -> both messages share the event timestamp
+        named = getattr(self, "_audience", False)
+        user_prefix = self._speaker if named else self._retain_user_prefix
+        assistant_prefix = self._agent_name if named else self._retain_assistant_prefix
         return [
             {"role": role, "content": f"{prefix}: {content}", "timestamp": now}
             for role, prefix, content in (
-                ("user", self._retain_user_prefix, user_content),
-                ("assistant", self._retain_assistant_prefix, assistant_content),
+                ("user", user_prefix, user_content),
+                ("assistant", assistant_prefix, assistant_content),
             )
         ]
+
+    def _audience_context(self) -> str:
+        """Who is talking to whom, so extraction never mistakes a colleague for a customer."""
+        if self._inside:
+            return (
+                f"An internal conversation at {self._company}: {self._speaker}, who works at {self._company}, talks "
+                f"with {self._agent_name}, one of {self._company}'s AI agents. {self._speaker} is one of the "
+                "company's own people, not a customer or a supplier."
+            )
+        return (
+            f"A conversation between {self._speaker}, writing on {self._platform}, who does not work at "
+            f"{self._company} (a customer, a supplier or another contact), and {self._agent_name}, one of "
+            f"{self._company}'s AI agents."
+        )
+
+    def _audience_tags(self) -> List[str]:
+        if not getattr(self, "_audience", False):
+            return []
+        return [f"by:{self._speaker}", *([f"agent:{self._agent_identity}"] if self._agent_identity else [])]
 
     def _build_metadata(self, *, message_count: int, turn_index: int) -> Dict[str, str]:
         metadata: Dict[str, str] = {
@@ -1926,9 +1966,10 @@ class HindsightMemoryProvider(MemoryProvider):
         # would flip the document's tag set and re-consolidate it from scratch.
         parent = self._parent_session_id if self._parent_session_id != self._session_id else ""
         lineage = (("session", self._session_id), ("parent", parent))
-        tags = [f"{kind}:{sid}" for kind, sid in lineage if sid] or None
+        tags = [*(f"{kind}:{sid}" for kind, sid in lineage if sid), *self._audience_tags()] or None
         bank_ids = list(self._write_bank_ids)
-        retain_async, retain_context = self._retain_async, self._retain_context
+        retain_async = self._retain_async
+        retain_context = self._audience_context() if getattr(self, "_audience", False) else self._retain_context
 
         def _job() -> None:
             self._name_outside_bank()
@@ -2092,12 +2133,18 @@ class HindsightMemoryProvider(MemoryProvider):
         wanted = args.get("for") or "me"
         bank = _SAVE_TARGETS.get(wanted) if self._inside else None
         bank = bank or self._bank_id
+        item = self._build_retain_kwargs(
+            content,
+            context=context or self._audience_context(),
+            tags=[*(args.get("tags") or []), *self._audience_tags()],
+            occurred_at=args.get("occurred_at"),
+        )
         self._name_outside_bank()
         resp = self._retain_batch(item, bank_id=bank, retain_async=self._retain_async)
         if self._retain_async:
             self._track_retain_ops(resp, bank)
         logger.info("Memory: person=%s save for=%s -> %s", self._person, wanted, bank)
-        if bank == self._bank_id and wanted != "me":
+        if not self._inside and wanted != "me":
             return (
                 "Saved only in this person's own memory: they are not one of the company's own people, "
                 "so they cannot add to the company's knowledge. Do not tell them it was saved for others."
