@@ -62,3 +62,14 @@ def test_a_config_file_still_takes_precedence(provider):
     assert instance._recall_sync is False
     assert instance._retain_indicator is True
     instance.shutdown()
+
+
+def test_the_names_and_scheduled_runs_set_in_the_environment_reach_a_profile_with_its_own_config_file(hermes_env):
+    config_path = hermes_env / "hindsight" / "config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text('{"mode": "cloud", "apiKey": "test-key", "agent_name": "Old"}')
+    SECRETS.update({"HINDSIGHT_COMPANY_NAME": "FIS Impianti", "HINDSIGHT_AGENT_NAME": "Sofia", "HINDSIGHT_RETAIN_CRON": "true"})
+    loaded = plugin._load_config()
+    for name in ("HINDSIGHT_COMPANY_NAME", "HINDSIGHT_AGENT_NAME", "HINDSIGHT_RETAIN_CRON"):
+        SECRETS.pop(name)
+    assert (loaded["company_name"], loaded["agent_name"]) == ("FIS Impianti", "Sofia")
