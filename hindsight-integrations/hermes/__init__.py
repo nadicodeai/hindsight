@@ -423,6 +423,12 @@ _RECALL_TYPES = ("world", "experience", "observation")
 _BANKS_PER_PAGE = 100
 
 
+def _spoken_name(name: object) -> str:
+    """A person's or company's name as the extraction context may quote it: no line breaks, markup or instructions' punctuation, and short."""
+    kept = re.sub(r"[^\w .'&-]+", " ", str(name or ""), flags=re.UNICODE)
+    return " ".join(kept.split())[:60].strip()
+
+
 def _titled(name: str) -> str:
     return " ".join(part.capitalize() for part in re.split(r"[-_\s]+", name or "") if part)
 
@@ -1413,13 +1419,13 @@ class HindsightMemoryProvider(MemoryProvider):
         else:
             self._person = f"{self._platform}-{self._user_id}"
             self._inside = self._platform.lower() in self._inside_platforms
-        self._company = str(cfg.get("company_name") or "").strip() or "the company"
+        self._company = _spoken_name(cfg.get("company_name")) or "the company"
         self._speaker = (
-            str(cfg.get("owner_name") or "").strip() or "the company's owner"
+            _spoken_name(cfg.get("owner_name")) or "the company's owner"
             if owner
-            else self._user_name or self._user_id
+            else _spoken_name(self._user_name) or _spoken_name(self._user_id) or "the person"
         )
-        self._agent_name = str(cfg.get("agent_name") or "").strip() or _titled(self._agent_identity) or "the agent"
+        self._agent_name = _spoken_name(cfg.get("agent_name")) or _titled(self._agent_identity) or "the agent"
         self._bank_id = TEAM_BANK if self._inside else _person_bank(self._person)
         self._write_bank_ids = [self._bank_id]
         self._read_banks = [self._bank_id, PUBLIC_BANK]
