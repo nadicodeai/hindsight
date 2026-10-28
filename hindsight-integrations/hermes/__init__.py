@@ -452,7 +452,10 @@ _MANAGEABLE_SETTINGS = {
     "recall_sync": "HINDSIGHT_RECALL_SYNC",
     "inside_platforms": "HINDSIGHT_INSIDE_PLATFORMS",
     "observation_scopes": "HINDSIGHT_RETAIN_OBSERVATION_SCOPES",
+    "retain_cron": "HINDSIGHT_RETAIN_CRON",
 }
+_IDENTITY_SETTINGS = ("company_name", "owner_name", "agent_name")
+_PROVENANCE = ("by:", "agent:")
 
 
 def _managed_keys() -> frozenset[str]:
@@ -472,7 +475,8 @@ def _load_config() -> dict:
     for path in (get_hermes_home() / "hindsight" / "config.json", Path.home() / ".hindsight" / "config.json"):
         # A corrupt (or empty) file falls through to the next source, as before the dedup.
         if path.exists() and (data := read_json_or_empty(path)):
-            return {**data, **{key: from_env[key] for key, name in _MANAGEABLE_SETTINGS.items() if name in pinned}}
+            pinned_settings = {key: from_env[key] for key, name in _MANAGEABLE_SETTINGS.items() if name in pinned}
+            return {**data, **pinned_settings, **{key: from_env[key] for key in _IDENTITY_SETTINGS if from_env[key]}}
     return from_env
 
 
@@ -490,6 +494,7 @@ def _env_config() -> dict:
         "company_name": get_secret("HINDSIGHT_COMPANY_NAME", "") or "",
         "owner_name": get_secret("HINDSIGHT_OWNER_NAME", "") or "",
         "agent_name": get_secret("HINDSIGHT_AGENT_NAME", "") or "",
+        "retain_cron": (get_secret("HINDSIGHT_RETAIN_CRON", "") or "").strip().lower() in ("1", "true", "yes"),
         # local_embedded's server: its LLM, and the Hermes login whose key and address it uses.
         "llm_provider": get_secret("HINDSIGHT_LLM_PROVIDER", "") or "",
         "llm_model": get_secret("HINDSIGHT_LLM_MODEL", "") or "",
@@ -2141,8 +2146,8 @@ class HindsightMemoryProvider(MemoryProvider):
         bank = bank or self._bank_id
         item = self._build_retain_kwargs(
             content,
-            context=context or self._audience_context(),
-            tags=[*(args.get("tags") or []), *self._audience_tags()],
+            context=" ".join(part for part in (self._audience_context(), context) if part),
+            tags=[*(tag for tag in args.get("tags") or [] if not tag.startswith(_PROVENANCE)), *self._audience_tags()],
             occurred_at=args.get("occurred_at"),
         )
         self._name_outside_bank()
