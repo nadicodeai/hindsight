@@ -1,4 +1,4 @@
-"""Inside and outside: with ``inside_platforms`` set, memory belongs to people and to the company.
+"""Inside and outside: with ``inside_platforms`` set, memory belongs to the company and to the people outside it.
 Each case drives the provider through the Hermes interface and asserts which banks it reads and
 writes on the recording fake client."""
 
@@ -37,11 +37,11 @@ def _searched(fake: FakeClient) -> list[str]:
     return [call["bank_id"] for call in fake.recalls]
 
 
-def test_an_inside_sender_reads_their_own_memory_and_the_company_knowledge(provider):
+def test_an_inside_sender_reads_the_company_memory_and_public_knowledge(provider):
     instance, fake = provider(INSIDE, platform="buzz", user_id="ab12", user_name="Mario")
     instance.handle_tool_call("long_term_memory_search", {"query": "opening hours"})
     instance.shutdown()
-    assert _searched(fake) == ["person-buzz-ab12", "company", "public"]
+    assert _searched(fake) == ["company", "public"]
 
 
 def test_an_outside_sender_reads_their_own_memory_and_public_knowledge_only(provider):
@@ -55,7 +55,45 @@ def test_no_sender_is_the_owner_and_inside(provider):
     instance, fake = provider(INSIDE, platform="cli")
     instance.handle_tool_call("long_term_memory_search", {"query": "anything"})
     instance.shutdown()
-    assert _searched(fake) == ["person-owner", "company", "public"]
+    assert _searched(fake) == ["company", "public"]
+
+
+def test_what_the_companys_people_say_is_saved_in_the_company_memory(provider):
+    instance, fake = provider(INSIDE, platform="buzz", user_id="ab12", user_name="Marco Conti")
+    instance.sync_turn("We ship with BRT on Tuesdays", "Noted.")
+    instance.shutdown()
+    assert [call["bank_id"] for call in fake.retains] == ["company"]
+
+
+def test_a_saved_turn_says_who_spoke_to_which_agent(provider):
+    named = {**INSIDE, "company_name": "FIS Impianti", "agent_name": "Sofia"}
+    instance, fake = provider(named, platform="buzz", user_id="ab12", user_name="Marco Conti", agent_identity="sofia")
+    instance.sync_turn("We ship with BRT on Tuesdays", "Noted.")
+    instance.shutdown()
+    item = fake.retains[0]["items"][0]
+    assert {"by:Marco Conti", "agent:sofia"} <= set(item["tags"])
+    assert "Marco Conti, who works at FIS Impianti" in item["context"]
+    assert "not a customer" in item["context"]
+    assert [message["content"] for message in json.loads(item["content"])] == [
+        "Marco Conti: We ship with BRT on Tuesdays",
+        "Sofia: Noted.",
+    ]
+
+
+def test_the_owner_at_the_window_is_named_and_an_outside_sender_is_a_contact(provider):
+    owner = {**INSIDE, "company_name": "FIS Impianti", "owner_name": "Vadim Comanescu"}
+    inside, inside_fake = provider(owner, platform="desktop")
+    inside.sync_turn("We stopped using DHL", "Only BRT from now.")
+    inside.shutdown()
+    outside, outside_fake = provider(owner, platform="whatsapp", user_id="393331234567", user_name="Paolo Rossi")
+    outside.sync_turn("40 Eco boxes for Thursday", "I'll confirm.")
+    outside.shutdown()
+    inside_item = inside_fake.retains[0]["items"][0]
+    outside_item = outside_fake.retains[0]["items"][0]
+    assert "by:Vadim Comanescu" in inside_item["tags"]
+    assert "Vadim Comanescu, who works at FIS Impianti" in inside_item["context"]
+    assert outside_fake.retains[0]["bank_id"] == "person-whatsapp-393331234567"
+    assert "Paolo Rossi, writing on whatsapp, who does not work at FIS Impianti" in outside_item["context"]
 
 
 def test_the_turn_is_saved_in_the_senders_own_memory(provider):
@@ -73,10 +111,10 @@ def test_an_inside_sender_saves_for_the_team_or_for_everyone(provider):
     )
     mine = json.loads(instance.handle_tool_call("long_term_memory_save", {"content": "On holiday"}))
     instance.shutdown()
-    assert [call["bank_id"] for call in fake.retains] == ["company", "public", "person-buzz-ab12"]
+    assert [call["bank_id"] for call in fake.retains] == ["company", "public", "company"]
     assert team["result"] == "Saved in the team's knowledge."
     assert everyone["result"] == "Saved in public knowledge."
-    assert mine["result"] == "Saved in this person's own memory."
+    assert mine["result"] == "Saved in the team's knowledge."
 
 
 def test_an_outside_save_for_everyone_stays_in_their_own_memory_and_says_so(provider):
@@ -90,13 +128,11 @@ def test_an_outside_save_for_everyone_stays_in_their_own_memory_and_says_so(prov
 
 
 def test_results_from_several_memories_are_ranked_by_score(provider):
-    client = _ScoredClient(
-        {"person-buzz-ab12": [("own", 0.2)], "company": [("team", 0.9)], "public": [("public", 0.5)]}
-    )
-    instance, _ = provider(INSIDE, client=client, platform="buzz", user_id="ab12")
+    client = _ScoredClient({"person-telegram-777": [("own", 0.2)], "public": [("public", 0.5)]})
+    instance, _ = provider(INSIDE, client=client, platform="telegram", user_id="777")
     result = json.loads(instance.handle_tool_call("long_term_memory_search", {"query": "q"}))
     instance.shutdown()
-    assert result["result"] == "1. team\n2. public\n3. own"
+    assert result["result"] == "1. public\n2. own"
 
 
 def test_an_inside_sender_finds_an_outside_person_by_name(provider, monkeypatch):
@@ -145,8 +181,7 @@ def test_reflect_names_the_memory_of_each_answer(provider):
     instance, fake = provider(INSIDE, client=FakeClient(reflect_text="Opens at 7:30."), platform="buzz", user_id="ab12")
     result = json.loads(instance.handle_tool_call("long_term_memory_reflect", {"query": "hours?"}))["result"]
     instance.shutdown()
-    assert [call["bank_id"] for call in fake.reflects] == ["person-buzz-ab12", "company", "public"]
-    assert "From this person's own memory:" in result
+    assert [call["bank_id"] for call in fake.reflects] == ["company", "public"]
     assert "From the team's knowledge:" in result and "From public knowledge:" in result
 
 
