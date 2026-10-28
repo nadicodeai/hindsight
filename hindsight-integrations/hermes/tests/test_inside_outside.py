@@ -327,3 +327,11 @@ def test_a_scheduled_task_s_turns_are_the_company_s_memory_when_the_settings_say
     instance.sync_turn("Every morning: list the open quotes", "Three quotes are open.")
     instance.shutdown()
     assert [call["bank_id"] for call in fake.retains] == ["company"]
+
+
+def test_the_save_tool_tells_the_agent_the_conversation_is_saved_on_its_own(provider):
+    instance, _ = provider(INSIDE, platform="desktop")
+    save = next(schema for schema in instance.get_tool_schemas() if schema["name"] == "long_term_memory_save")
+    instance.shutdown()
+    assert "saved to memory on its own after each reply" in save["description"]
+    assert "for" in save["parameters"]["properties"]

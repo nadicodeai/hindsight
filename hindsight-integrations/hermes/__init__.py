@@ -356,6 +356,12 @@ _FOR_PROPERTY = {
     ),
 }
 
+_AUDIENCE_RETAIN_DESCRIPTION = (
+    RETAIN_SCHEMA["description"] + " This conversation is saved to memory on its own after each reply, so do not "
+    "save again what was just said: save only what the conversation does not hold, such as a fact read in a "
+    "document or found with a tool, or a fact for everyone."
+)
+
 _CLIENT_PROPERTY = {
     "type": "string",
     "description": (
@@ -2114,7 +2120,7 @@ class HindsightMemoryProvider(MemoryProvider):
         if not getattr(self, "_audience", False):
             return [RETAIN_SCHEMA, RECALL_SCHEMA, REFLECT_SCHEMA]
         return [
-            _with_property(RETAIN_SCHEMA, "for", _FOR_PROPERTY),
+            {**_with_property(RETAIN_SCHEMA, "for", _FOR_PROPERTY), "description": _AUDIENCE_RETAIN_DESCRIPTION},
             _with_property(RECALL_SCHEMA, "client", _CLIENT_PROPERTY),
             REFLECT_SCHEMA,
         ]
