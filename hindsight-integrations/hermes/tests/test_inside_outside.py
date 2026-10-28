@@ -303,3 +303,27 @@ def test_the_name_lookup_reads_every_page_of_banks(provider, monkeypatch):
     assert instance._outside_banks_named("rossi") == ["person-whatsapp-149"]
     assert set(asked) == {"rossi"}
     instance.shutdown()
+
+
+def test_a_deliberate_save_keeps_who_talks_to_whom_and_the_agent_cannot_name_who_taught_it(provider):
+    owner = {**INSIDE, "company_name": "FIS Impianti", "owner_name": "Vadim Comanescu"}
+    instance, fake = provider(owner, platform="desktop")
+    instance.handle_tool_call(
+        "long_term_memory_save",
+        {"content": "Rossi pays at 90 days", "context": "payment terms", "tags": ["by:Mario", "agent:other", "invoices"]},
+    )
+    instance.shutdown()
+    item = fake.retains[0]["items"][0]
+    assert item["context"].startswith("An internal conversation at FIS Impianti: Vadim Comanescu")
+    assert item["context"].endswith("payment terms")
+    assert [tag for tag in item["tags"] if tag.startswith(("by:", "agent:")) or tag == "invoices"] == [
+        "invoices",
+        "by:Vadim Comanescu",
+    ]
+
+
+def test_a_scheduled_task_s_turns_are_the_company_s_memory_when_the_settings_say_so(provider):
+    instance, fake = provider({**INSIDE, "retain_cron": True}, agent_context="cron")
+    instance.sync_turn("Every morning: list the open quotes", "Three quotes are open.")
+    instance.shutdown()
+    assert [call["bank_id"] for call in fake.retains] == ["company"]
