@@ -11,6 +11,19 @@ import pytest
 from conftest import FakeClient
 
 INSIDE = {"inside_platforms": "buzz"}
+AUDIENCES = {**INSIDE, "audience_resolver": "company_audiences:open_to_everyone"}
+
+
+@pytest.fixture
+def open_channels(monkeypatch):
+    asked = []
+
+    def open_to_everyone(platform, chat_id, setting):
+        asked.append((platform, chat_id))
+        return chat_id == "general"
+
+    monkeypatch.setitem(sys.modules, "company_audiences", types.SimpleNamespace(open_to_everyone=open_to_everyone))
+    return asked
 
 
 class _ScoredClient(FakeClient):
@@ -115,8 +128,8 @@ def test_the_turn_is_saved_in_the_senders_own_memory(provider):
     assert [call["bank_id"] for call in fake.retains] == ["person-telegram-777"]
 
 
-def test_an_inside_sender_saves_for_the_team_or_for_everyone(provider):
-    instance, fake = provider(INSIDE, platform="buzz", user_id="ab12")
+def test_an_inside_sender_saves_for_the_team_or_for_everyone(provider, open_channels):
+    instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id="general", chat_type="group")
     team = json.loads(instance.handle_tool_call("long_term_memory_save", {"content": "Margin 32%", "for": "team"}))
     everyone = json.loads(
         instance.handle_tool_call("long_term_memory_save", {"content": "Opens at 7:30", "for": "everyone"})
@@ -335,3 +348,87 @@ def test_the_save_tool_tells_the_agent_the_conversation_is_saved_on_its_own(prov
     instance.shutdown()
     assert "saved to memory on its own after each reply" in save["description"]
     assert "for" in save["parameters"]["properties"]
+
+
+def _tags(fake: FakeClient) -> list[set[str]]:
+    return [{tag for tag in call["items"][0]["tags"] if tag.startswith("audience:")} for call in fake.retains]
+
+
+def _filters(fake: FakeClient) -> list[tuple[str, tuple[str, ...] | None, str | None]]:
+    return [(call["bank_id"], tuple(call["tags"]) if call.get("tags") else None, call.get("tags_match")) for call in fake.recalls]
+
+
+@pytest.mark.parametrize(
+    ("chat", "chat_type", "kept", "recalled"),
+    [
+        ("general", "group", "audience:company", ("audience:company",)),
+        ("paghe", "group", "audience:buzz:paghe", ("audience:company", "audience:buzz:paghe")),
+        ("dm-luca", "dm", "audience:buzz:dm-luca", ("audience:company", "audience:buzz:dm-luca")),
+    ],
+    ids=["an open channel", "a private channel", "a direct message"],
+)
+def test_an_inside_conversation_keeps_and_recalls_within_its_audience(provider, open_channels, chat, chat_type, kept, recalled):
+    instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id=chat, chat_type=chat_type)
+    instance.sync_turn("Bonuses arrive on 27 November", "Noted.")
+    instance.handle_tool_call("long_term_memory_search", {"query": "bonuses"})
+    instance.shutdown()
+    assert _tags(fake) == [{kept}]
+    assert _filters(fake) == [("company", recalled, "any_strict"), ("public", None, None)]
+    assert open_channels == [("buzz", chat)]
+
+
+def test_the_owner_keeps_what_they_say_on_their_computer_and_recalls_every_audience(provider, open_channels):
+    instance, fake = provider(AUDIENCES, platform="desktop")
+    instance.sync_turn("Quotes go out on the new letterhead", "Noted.")
+    instance.handle_tool_call("long_term_memory_search", {"query": "letterhead"})
+    instance.shutdown()
+    assert _tags(fake) == [{"audience:installation"}]
+    assert _filters(fake) == [("company", None, None), ("public", None, None)]
+    assert open_channels == []
+
+
+def test_a_conversation_whose_audience_cannot_be_read_keeps_to_itself(provider, monkeypatch):
+    def unreachable(**_):
+        raise ConnectionError("the relay does not answer")
+
+    monkeypatch.setitem(sys.modules, "company_audiences", types.SimpleNamespace(open_to_everyone=unreachable))
+    instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id="general", chat_type="group")
+    instance.sync_turn("Bonuses arrive on 27 November", "Noted.")
+    instance.shutdown()
+    assert _tags(fake) == [{"audience:buzz:general"}]
+
+
+def test_a_save_for_everyone_from_a_private_conversation_stays_with_its_people(provider, open_channels):
+    instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id="paghe", chat_type="group")
+    result = json.loads(
+        instance.handle_tool_call(
+            "long_term_memory_save", {"content": "Bonuses arrive on 27 November", "for": "everyone", "tags": ["audience:company"]}
+        )
+    )
+    instance.shutdown()
+    assert [call["bank_id"] for call in fake.retains] == ["company"]
+    assert _tags(fake) == [{"audience:buzz:paghe"}]
+    assert result["result"].startswith("Saved only for the people in this conversation")
+
+
+@pytest.mark.parametrize(
+    ("chat", "chat_name", "chat_type", "where"),
+    [("general", "general", "group", "#general"), ("dm-luca", "DM", "dm", "this direct message")],
+    ids=["a channel", "a direct message"],
+)
+def test_the_agent_is_told_she_uses_only_what_everyone_in_the_conversation_can_read(
+    provider, open_channels, chat, chat_name, chat_type, where
+):
+    instance, _ = provider(
+        AUDIENCES, platform="buzz", user_id="ab12", chat_id=chat, chat_name=chat_name, chat_type=chat_type
+    )
+    block = instance.system_prompt_block()
+    instance.shutdown()
+    assert f"you can only use what everyone in {where} can read" in block
+
+
+def test_the_owner_is_told_nothing_about_audiences(provider, open_channels):
+    instance, _ = provider(AUDIENCES, platform="desktop")
+    block = instance.system_prompt_block()
+    instance.shutdown()
+    assert "Who can read this conversation" not in block
