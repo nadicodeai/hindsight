@@ -1048,7 +1048,7 @@ def test_a_late_prefetch_for_a_previous_session_is_ignored(provider, monkeypatch
     """#5628: the stale call would start a recall under the new session's generation."""
     instance, _ = provider({"prefetch_waits_for_retain": False})
     calls = []
-    monkeypatch.setattr(instance, "_do_recall", lambda query: calls.append(query) or ("", 0))
+    monkeypatch.setattr(instance, "_do_recall", lambda query, audience=None: calls.append(query) or ("", 0))
     instance.on_session_switch("session-2")
     instance.queue_prefetch("old query", session_id="session-1")
     instance.queue_prefetch("new query", session_id="session-2")
