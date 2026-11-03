@@ -2,6 +2,7 @@
 Each case drives the provider through the Hermes interface and asserts which banks it reads and
 writes on the recording fake client."""
 
+import contextvars
 import json
 import sys
 import types
@@ -417,6 +418,56 @@ def test_a_channel_made_private_during_a_session_keeps_what_is_said_after_with_i
     assert _filters(fake)[0] == ("company", ("audience:company", "audience:buzz:general"), "any_strict")
     first, second = (call["document_id"] for call in fake.retains)
     assert first != second
+
+
+def _channel_open(monkeypatch, open_now: dict[str, bool]) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "company_audiences",
+        types.SimpleNamespace(open_to_everyone=lambda platform, chat_id, setting: open_now[chat_id]),
+    )
+
+
+def test_a_turn_saved_after_its_channel_opens_keeps_the_audience_it_was_said_in(provider, monkeypatch):
+    open_now = {"paghe": False}
+    _channel_open(monkeypatch, open_now)
+    instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id="paghe", chat_type="group")
+    instance.on_turn_start(1, "Bonuses arrive on 27 November")
+    held_save = contextvars.copy_context()
+    open_now["paghe"] = True
+    instance.on_turn_start(2, "Marco leaves in March")
+    held_save.run(instance.sync_turn, "Bonuses arrive on 27 November", "Noted.")
+    instance.sync_turn("Marco leaves in March", "Noted.")
+    instance.shutdown()
+    saved = [
+        (json.loads(call["items"][0]["content"])[0]["content"], tags) for call, tags in zip(fake.retains, _tags(fake))
+    ]
+    assert saved == [
+        ("ab12: Bonuses arrive on 27 November", {"audience:buzz:paghe"}),
+        ("ab12: Marco leaves in March", {"audience:company"}),
+    ]
+
+
+def test_a_recall_prepared_in_a_private_turn_is_not_used_after_the_channel_opens(provider, monkeypatch):
+    open_now = {"paghe": False}
+    _channel_open(monkeypatch, open_now)
+    instance, fake = provider(
+        {**AUDIENCES, "prefetch_waits_for_retain": False},
+        client=FakeClient(recall_texts=["Marco leaves in March"]),
+        platform="buzz",
+        user_id="ab12",
+        chat_id="paghe",
+        chat_type="group",
+    )
+    instance.on_turn_start(1, "When does Marco leave?")
+    instance.queue_prefetch("When does Marco leave?")
+    instance._prefetch_thread.join(5)
+    open_now["paghe"] = True
+    instance.on_turn_start(2, "Who is leaving?")
+    injected = instance.prefetch("Who is leaving?")
+    instance.shutdown()
+    assert _filters(fake)[0] == ("company", ("audience:company", "audience:buzz:paghe"), "any_strict")
+    assert injected == ""
 
 
 def test_a_save_for_everyone_from_a_private_conversation_stays_with_its_people(provider, open_channels):

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import contextlib
+import contextvars
 import importlib
 import json
 import logging
@@ -674,7 +675,10 @@ class HindsightMemoryProvider(MemoryProvider):
         self._prefetch_method = "recall"  # "recall" or "reflect"
         for name in _SESSION_KWARGS:
             setattr(self, f"_{name}", "")
-        self._shared_with = ""
+        # The audience of the latest turn to start; each turn's own is bound in its context, which
+        # Hermes carries into the background worker that saves the turn.
+        self._shared_with = self._buffered_audience = ""
+        self._turn_audience: contextvars.ContextVar[str] = contextvars.ContextVar(f"hindsight_turn_audience_{id(self)}")
         self._session_id = self._parent_session_id = self._document_id = ""
         self._status_callback: Optional[Callable[[str], None]] = None
         # Set from initialize() kwargs; defaults keep _start_embedded_daemon safe when a
@@ -716,7 +720,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._apply_retain_policy({})
 
         # Recall: pending prefetch block + count, and the indicator state (recall_status()).
-        self._prefetch_result, self._prefetch_count = "", 0
+        self._prefetch_result, self._prefetch_count, self._prefetch_audience = "", 0, ""
         self._prefetch_lock = threading.Lock()
         self._prefetch_thread = None
         # Bumped by every new prefetch, session switch and shutdown: a worker writes its result
@@ -1392,7 +1396,7 @@ class HindsightMemoryProvider(MemoryProvider):
 
     # -- retain target -----------------------------------------------------------
 
-    def _resolve_retain_target(self, fallback_document_id: str) -> tuple[str, str | None]:
+    def _resolve_retain_target(self, fallback_document_id: str, audience: str) -> tuple[str, str | None]:
         """(document_id, update_mode) from live API capability: >= 0.5.0 reuses the
         stable session-scoped id with ``update_mode='append'``; older APIs get
         *fallback_document_id* (per-process unique) and no update_mode — the only
@@ -1410,15 +1414,15 @@ class HindsightMemoryProvider(MemoryProvider):
         if self._append_unsupported:
             return fallback_document_id, None
         if self._session_id and _check_api_supports_update_mode_append(probe_url, self._api_key):
-            return self._audience_document(self._session_id), "append"
+            return self._audience_document(self._session_id, audience), "append"
         return fallback_document_id, None
 
-    def _audience_document(self, document_id: str) -> str:
+    def _audience_document(self, document_id: str, audience: str) -> str:
         """An append reprocesses the whole document under the newest turn's tags, so each audience
         of an inside conversation keeps its own document and no turn takes another audience's tag."""
-        if not getattr(self, "_audience", False) or self._shared_with in ("", OWNERS_OWN):
+        if not getattr(self, "_audience", False) or audience in ("", OWNERS_OWN):
             return document_id
-        return f"{document_id}:{self._shared_with}"
+        return f"{document_id}:{audience}"
 
     # -- lifecycle ---------------------------------------------------------------
 
@@ -1602,7 +1606,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._inside_platforms = _parse_platforms(cfg.get("inside_platforms", ""))
         self._audience = bool(self._inside_platforms)
         self._bank_named = False
-        self._shared_with = ""
+        self._shared_with = self._buffered_audience = ""
         if not self._audience:
             self._person, self._inside = "", True
             self._read_banks = [self._bank_id]
@@ -1626,6 +1630,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._shared_with = (
             OWNERS_OWN if owner else self._conversation_audience(cfg.get("audience_resolver")) if self._inside else ""
         )
+        self._buffered_audience = self._shared_with
         logger.info(
             "Memory: person=%s inside=%s reads=%s shared_with=%s",
             self._person,
@@ -1652,29 +1657,22 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
         """A member can open or close a channel while the session lasts, so its audience is read
-        again on every turn. Turns kept under the previous audience leave first, under its tag, and
-        a recall made for it is dropped."""
+        again on every turn and bound to the turn: the memory manager saves a turn on its background
+        worker, possibly after the next turn started, under the context the turn ran in."""
         if not getattr(self, "_audience", False) or self._shared_with in ("", OWNERS_OWN):
             return
         now = self._conversation_audience(self._config.get("audience_resolver"))
-        if now == self._shared_with:
-            return
-        self._flush_buffered_turns("flush-on-audience")
-        with self._prefetch_lock:
-            self._prefetch_generation += 1
-            self._prefetch_result, self._prefetch_count = "", 0
-        logger.info("Memory: %s is now shared with %s", self._shared_with, now)
-        self._shared_with = now
-        self._document_id = _mint_document_id(self._session_id)
-        self._session_turns = []
-        self._last_retained_turn_count = 0
+        self._turn_audience.set(now)
+        if now != self._shared_with:
+            logger.info("Memory: %s is now shared with %s", self._shared_with, now)
+            self._shared_with = now
 
-    def _recall_audiences(self, bank: str) -> list[str] | None:
+    def _recall_audiences(self, bank: str, audience: str) -> list[str] | None:
         """The audiences a recall in *bank* may return: every one for the owner and outside the
         company's bank, else what everyone in the company may read and this conversation's own."""
-        if bank != TEAM_BANK or not getattr(self, "_audience", False) or self._shared_with in ("", OWNERS_OWN):
+        if bank != TEAM_BANK or not getattr(self, "_audience", False) or audience in ("", OWNERS_OWN):
             return None
-        return list(dict.fromkeys((EVERYONE_INSIDE, self._shared_with)))
+        return list(dict.fromkeys((EVERYONE_INSIDE, audience)))
 
     def _bank_label(self, bank: str) -> str:
         return _BANK_LABELS.get(bank) or ("this person's own memory" if bank == self._bank_id else f"the memory {bank}")
@@ -1955,7 +1953,7 @@ class HindsightMemoryProvider(MemoryProvider):
             logger.debug("Prefetch: skipped (%s)", why)
         return why is not None
 
-    def _recall(self, query: str, banks: list | None = None) -> list:
+    def _recall(self, query: str, banks: list | None = None, *, audience: str | None = None) -> list:
         """Semantic recall across the write set (primary bank first, then
         mirrors/additional banks), then any recall-only banks. A result whose text an
         earlier bank already returned is dropped.
@@ -1965,8 +1963,10 @@ class HindsightMemoryProvider(MemoryProvider):
         single-bank recall does; a failing extra bank is skipped with a warning.
         Single-bank configs query exactly ``_bank_id``. With ``inside_platforms`` set, the
         banks are the person's read banks (or the *banks* a lookup names), and the results
-        are ordered by their final score across banks.
+        are ordered by their final score across banks. *audience* is the conversation's audience
+        the recall is for, by default the latest turn's.
         """
+        audience = self._shared_with if audience is None else audience
         bank_ids = [
             bank_id
             for i, bank_id in enumerate(
@@ -1984,7 +1984,7 @@ class HindsightMemoryProvider(MemoryProvider):
             kwargs["min_scores"] = self._recall_min_scores
 
         def _in(bank_id: str) -> dict:
-            audiences = self._recall_audiences(bank_id)
+            audiences = self._recall_audiences(bank_id, audience)
             return {**kwargs, "tags": audiences, "tags_match": "any_strict"} if audiences else kwargs
 
         async def _recall_all(client):
@@ -2030,7 +2030,8 @@ class HindsightMemoryProvider(MemoryProvider):
             results.sort(key=lambda r: getattr(getattr(r, "scores", None), "final", 0) or 0, reverse=True)
         return results
 
-    def _reflect(self, query: str) -> str | None:
+    def _reflect(self, query: str, *, audience: str | None = None) -> str | None:
+        audience = self._shared_with if audience is None else audience
         # Without inside_platforms the bank is _bank_id, which a {session} template moves on a session switch.
         banks = self._read_banks if getattr(self, "_audience", False) else [self._bank_id]
         answers = []
@@ -2038,7 +2039,7 @@ class HindsightMemoryProvider(MemoryProvider):
             kwargs: Dict[str, Any] = {"bank_id": bank, "query": query, "budget": self._budget}
             if self._reflect_tags:
                 kwargs.update(tags=self._reflect_tags, tags_match=self._reflect_tags_match)
-            if audiences := self._recall_audiences(bank):
+            if audiences := self._recall_audiences(bank, audience):
                 kwargs.update(tags=audiences, tags_match="any_strict")
             try:
                 resp = self._run_hindsight_operation(lambda client, kwargs=kwargs: client.areflect(**kwargs))
@@ -2052,7 +2053,7 @@ class HindsightMemoryProvider(MemoryProvider):
             return answers[0][1] if answers else None
         return "\n\n".join(f"From {self._bank_label(bank)}:\n{text}" for bank, text in answers) or None
 
-    def _do_recall(self, query: str) -> tuple[str, int]:
+    def _do_recall(self, query: str, *, audience: str | None = None) -> tuple[str, int]:
         """One recall/reflect for *query* (background prefetch and ``recall_sync`` paths)
         -> (text, memory count); the count is 0 for reflect (synthesis) and on error."""
         if self._recall_max_input_chars:
@@ -2060,11 +2061,11 @@ class HindsightMemoryProvider(MemoryProvider):
         try:
             if self._prefetch_method == "reflect":
                 logger.debug("Recall: calling reflect (bank=%s, query_len=%d)", self._bank_id, len(query))
-                return self._reflect(query) or "", 0
+                return self._reflect(query, audience=audience) or "", 0
             logger.debug(
                 "Recall: calling recall (bank=%s, query_len=%d, budget=%s)", self._bank_id, len(query), self._budget
             )
-            results = self._recall(query)
+            results = self._recall(query, audience=audience)
             logger.debug("Recall: returned %d results", len(results))
             return "\n".join(f"- {r.text}" for r in results if r.text), len(results)
         except Exception as e:
@@ -2098,11 +2099,15 @@ class HindsightMemoryProvider(MemoryProvider):
         # See NousResearch/hermes-agent#5820.
         if self._recall_sync:
             return self._finish_prefetch(*(("", 0) if self._recall_disabled() else self._do_recall(query)))
-        # Default: the background worker's result for the previous turn (capped join).
+        # Default: the background worker's result for the previous turn (capped join), used only
+        # when it was recalled for the audience of this turn.
         self._join_prefetch(3.0, log=True)
         with self._prefetch_lock:
-            result, count = self._prefetch_result, self._prefetch_count
+            result, count, audience = self._prefetch_result, self._prefetch_count, self._prefetch_audience
             self._prefetch_result, self._prefetch_count = "", 0
+        if result and audience != self._shared_with:
+            logger.debug("Prefetch: dropped a recall made for %s in a turn shared with %s", audience, self._shared_with)
+            result, count = "", 0
         return self._finish_prefetch(result, count)
 
     def recall_status(self) -> Optional[RecallStatus]:
@@ -2130,11 +2135,12 @@ class HindsightMemoryProvider(MemoryProvider):
             # retain to be recall-visible so the warmed context includes it.
             if self._prefetch_waits_for_retain:
                 self._wait_for_retains_drained(self._prefetch_retain_drain_timeout)
-            text, count = self._do_recall(query)
+            audience = self._shared_with
+            text, count = self._do_recall(query, audience=audience)
             if text:
                 with self._prefetch_lock:
                     if generation == self._prefetch_generation:
-                        self._prefetch_result, self._prefetch_count = text, count
+                        self._prefetch_result, self._prefetch_count, self._prefetch_audience = text, count, audience
 
         self._prefetch_thread = spawn_context_thread(_run, name="hindsight-prefetch")
         self._prefetch_thread.start()
@@ -2168,13 +2174,13 @@ class HindsightMemoryProvider(MemoryProvider):
             f"{self._company}'s AI agents."
         )
 
-    def _audience_tags(self) -> List[str]:
+    def _audience_tags(self, audience: str) -> List[str]:
         if not getattr(self, "_audience", False):
             return []
         return [
             f"by:{self._speaker}",
             *([f"agent:{self._agent_identity}"] if self._agent_identity else []),
-            *([self._shared_with] if self._shared_with else []),
+            *([audience] if audience else []),
         ]
 
     def _build_metadata(self, *, message_count: int, turn_index: int) -> Dict[str, str]:
@@ -2242,7 +2248,14 @@ class HindsightMemoryProvider(MemoryProvider):
         )
 
     def _make_turn_retain_job(
-        self, turns: list[str], *, document_id: str, update_mode: str | None, label: str, track_ops: bool = True
+        self,
+        turns: list[str],
+        *,
+        audience: str,
+        document_id: str,
+        update_mode: str | None,
+        label: str,
+        track_ops: bool = True,
     ) -> Callable[[], None]:
         """Writer job shipping *turns* as one document. Inputs are snapshotted NOW: the
         writer runs after later sync_turn() calls mutate _session_turns/_turn_index/_session_id."""
@@ -2259,7 +2272,7 @@ class HindsightMemoryProvider(MemoryProvider):
         # would flip the document's tag set and re-consolidate it from scratch.
         parent = self._parent_session_id if self._parent_session_id != self._session_id else ""
         lineage = (("session", self._session_id), ("parent", parent))
-        tags = [*(f"{kind}:{sid}" for kind, sid in lineage if sid), *self._audience_tags()] or None
+        tags = [*(f"{kind}:{sid}" for kind, sid in lineage if sid), *self._audience_tags(audience)] or None
         bank_ids = list(self._write_bank_ids)
         retain_async = self._retain_async
         retain_context = self._audience_context() if getattr(self, "_audience", False) else self._retain_context
@@ -2344,6 +2357,14 @@ class HindsightMemoryProvider(MemoryProvider):
         if session_id:
             self._session_id = str(session_id).strip()
 
+        audience = self._turn_audience.get(self._shared_with)
+        if audience != self._buffered_audience:
+            # Turns said under another audience leave first, under their own tag, in their own document.
+            self._flush_buffered_turns("flush-on-audience")
+            self._session_turns = []
+            self._last_retained_turn_count = 0
+            self._document_id = _mint_document_id(self._session_id)
+            self._buffered_audience = audience
         self._session_turns.append(
             json.dumps(self._build_turn_messages(user_content, assistant_content), ensure_ascii=False)
         )
@@ -2356,7 +2377,7 @@ class HindsightMemoryProvider(MemoryProvider):
             )
             return
 
-        document_id, update_mode = self._resolve_retain_target(self._document_id)
+        document_id, update_mode = self._resolve_retain_target(self._document_id, audience)
         # Append-capable APIs get only the delta since the last retain; legacy /
         # overwrite APIs need the whole session because each retain replaces the document.
         start = self._last_retained_turn_count if update_mode == "append" else 0
@@ -2372,7 +2393,7 @@ class HindsightMemoryProvider(MemoryProvider):
         )
 
         job = self._make_turn_retain_job(
-            turns_to_retain, document_id=document_id, update_mode=update_mode, label="retain"
+            turns_to_retain, audience=audience, document_id=document_id, update_mode=update_mode, label="retain"
         )
         # Indicator fires only past every skip/buffer gate: solely on turns that persist.
         # Model-independent status line; no-op without retain_indicator/status channel.
@@ -2467,7 +2488,10 @@ class HindsightMemoryProvider(MemoryProvider):
         item = self._build_retain_kwargs(
             content,
             context=" ".join(part for part in (self._audience_context(), context) if part),
-            tags=[*(tag for tag in args.get("tags") or [] if not tag.startswith(_PROVENANCE)), *self._audience_tags()],
+            tags=[
+                *(tag for tag in args.get("tags") or [] if not tag.startswith(_PROVENANCE)),
+                *self._audience_tags(self._shared_with),
+            ],
             occurred_at=args.get("occurred_at"),
         )
         self._name_outside_bank()
@@ -2531,12 +2555,18 @@ class HindsightMemoryProvider(MemoryProvider):
     # -- session lifecycle -------------------------------------------------------
 
     def _flush_buffered_turns(self, label: str) -> None:
-        """Queue the buffered turns under the CURRENT session/document ids."""
+        """Queue the buffered turns under the CURRENT session/document ids and their own audience."""
         if not self._session_turns or self._shutting_down.is_set():
             return
-        document_id, update_mode = self._resolve_retain_target(self._document_id)
+        audience = self._buffered_audience
+        document_id, update_mode = self._resolve_retain_target(self._document_id, audience)
         job = self._make_turn_retain_job(
-            list(self._session_turns), document_id=document_id, update_mode=update_mode, label=label, track_ops=False
+            list(self._session_turns),
+            audience=audience,
+            document_id=document_id,
+            update_mode=update_mode,
+            label=label,
+            track_ops=False,
         )
         # Same writer queue as sync_turn: FIFO behind queued retains, no two threads
         # racing aretain_batch on one document, shutdown drain intact, and a failed flush
