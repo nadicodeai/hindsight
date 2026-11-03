@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import contextlib
+import importlib
 import json
 import logging
 import os
@@ -424,6 +425,17 @@ OWN_WINDOW = "desktop"
 _SAVE_TARGETS = {"team": TEAM_BANK, "everyone": PUBLIC_BANK}
 _BANK_LABELS = {TEAM_BANK: "the team's knowledge", PUBLIC_BANK: "public knowledge"}
 
+# Audiences: every memory in the company's bank carries one ``audience:`` tag, the people who could read
+# the conversation it came from, and a conversation recalls only the memories all of its own people may
+# read (Buzz's information-flow rule: a memory m is read in conversation D only when A(D) ⊆ R(m)). What
+# the owner's own conversations keep (the window, a terminal, a scheduled task) is the installation's,
+# and the owner's recall reads every audience. An inside conversation is its own audience, unless the
+# ``audience_resolver`` answers that everyone in the company can read it. ``observation_scopes`` of
+# ``[["audience:*"]]`` keep each observation within one audience, so a summary never widens one.
+AUDIENCE = "audience:"
+EVERYONE_INSIDE = AUDIENCE + "company"
+OWNERS_OWN = AUDIENCE + "installation"
+
 
 _RECALL_TYPES = ("world", "experience", "observation")
 _BANKS_PER_PAGE = 100
@@ -459,9 +471,10 @@ _MANAGEABLE_SETTINGS = {
     "inside_platforms": "HINDSIGHT_INSIDE_PLATFORMS",
     "observation_scopes": "HINDSIGHT_RETAIN_OBSERVATION_SCOPES",
     "retain_cron": "HINDSIGHT_RETAIN_CRON",
+    "audience_resolver": "HINDSIGHT_AUDIENCE_RESOLVER",
 }
 _IDENTITY_SETTINGS = ("company_name", "owner_name", "agent_name")
-_PROVENANCE = ("by:", "agent:")
+_PROVENANCE = ("by:", "agent:", AUDIENCE)
 
 
 def _managed_keys() -> frozenset[str]:
@@ -501,6 +514,7 @@ def _env_config() -> dict:
         "owner_name": get_secret("HINDSIGHT_OWNER_NAME", "") or "",
         "agent_name": get_secret("HINDSIGHT_AGENT_NAME", "") or "",
         "retain_cron": (get_secret("HINDSIGHT_RETAIN_CRON", "") or "").strip().lower() in ("1", "true", "yes"),
+        "audience_resolver": get_secret("HINDSIGHT_AUDIENCE_RESOLVER", "") or "",
         # local_embedded's server: its LLM, and the Hermes login whose key and address it uses.
         "llm_provider": get_secret("HINDSIGHT_LLM_PROVIDER", "") or "",
         "llm_model": get_secret("HINDSIGHT_LLM_MODEL", "") or "",
@@ -620,6 +634,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._prefetch_method = "recall"  # "recall" or "reflect"
         for name in _SESSION_KWARGS:
             setattr(self, f"_{name}", "")
+        self._shared_with = ""
         self._session_id = self._parent_session_id = self._document_id = ""
         self._status_callback: Optional[Callable[[str], None]] = None
         # Set from initialize() kwargs; defaults keep _start_embedded_daemon safe when a
@@ -1420,6 +1435,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._inside_platforms = _parse_platforms(cfg.get("inside_platforms", ""))
         self._audience = bool(self._inside_platforms)
         self._bank_named = False
+        self._shared_with = ""
         if not self._audience:
             self._person, self._inside = "", True
             self._read_banks = [self._bank_id]
@@ -1440,7 +1456,39 @@ class HindsightMemoryProvider(MemoryProvider):
         self._bank_id = TEAM_BANK if self._inside else _person_bank(self._person)
         self._write_bank_ids = [self._bank_id]
         self._read_banks = [self._bank_id, PUBLIC_BANK]
-        logger.info("Memory: person=%s inside=%s reads=%s", self._person, self._inside, ",".join(self._read_banks))
+        self._shared_with = (
+            OWNERS_OWN if owner else self._conversation_audience(cfg.get("audience_resolver")) if self._inside else ""
+        )
+        logger.info(
+            "Memory: person=%s inside=%s reads=%s shared_with=%s",
+            self._person,
+            self._inside,
+            ",".join(self._read_banks),
+            self._shared_with,
+        )
+
+    def _conversation_audience(self, resolver: object) -> str:
+        """``audience:company`` when the resolver answers that everyone in the company can read this
+        conversation, else the conversation's own audience: a resolver missing, failing or unsure keeps
+        what is said here with the people who were here."""
+        own = f"{AUDIENCE}{self._platform.lower()}:{self._chat_id or self._user_id}"
+        if not resolver or not self._chat_id:
+            return own
+        try:
+            module, _, function = str(resolver).partition(":")
+            answers = getattr(importlib.import_module(module), function)
+            open_to_everyone = answers(platform=self._platform, chat_id=self._chat_id, setting=_scoped_setting)
+        except Exception as exc:
+            logger.warning("Memory: the audience of %s could not be read, so it stays its own: %r", own, exc)
+            return own
+        return EVERYONE_INSIDE if open_to_everyone is True else own
+
+    def _recall_audiences(self, bank: str) -> list[str] | None:
+        """The audiences a recall in *bank* may return: every one for the owner and outside the
+        company's bank, else what everyone in the company may read and this conversation's own."""
+        if bank != TEAM_BANK or not getattr(self, "_audience", False) or self._shared_with in ("", OWNERS_OWN):
+            return None
+        return list(dict.fromkeys((EVERYONE_INSIDE, self._shared_with)))
 
     def _bank_label(self, bank: str) -> str:
         return _BANK_LABELS.get(bank) or ("this person's own memory" if bank == self._bank_id else f"the memory {bank}")
@@ -1687,7 +1735,20 @@ class HindsightMemoryProvider(MemoryProvider):
         label = "" if mode == "hybrid" else f" ({mode} mode)"
         # With auto_recall off nothing is injected, so hybrid must not promise injected context.
         tail = _TOOL_GUIDANCE if mode == "hybrid" and not self._auto_recall else _SYSTEM_PROMPT_TAILS[mode]
-        return f"# Nadia long-term memory\nActive{label}.\n{tail}"
+        return f"# Nadia long-term memory\nActive{label}.\n{tail}{self._audience_rule()}"
+
+    def _audience_rule(self) -> str:
+        """What the agent tells someone who asks about another audience, in this conversation's words."""
+        if not getattr(self, "_audience", False) or getattr(self, "_shared_with", "") in ("", OWNERS_OWN):
+            return ""
+        name = _spoken_name(self._chat_name)
+        where = "this direct message" if self._chat_type == "dm" else f"#{name}" if name else "this conversation"
+        return (
+            f"\n\n# Who can read this conversation\nEveryone in {where} can read this conversation, and you use only "
+            f"what all of them can read. When asked about something nothing here tells you, answer that you can only "
+            f"use what everyone in {where} can read and that nothing here says anything about it. Never suggest that "
+            "it was said somewhere else."
+        )
 
     # -- recall ------------------------------------------------------------------
 
@@ -1734,11 +1795,15 @@ class HindsightMemoryProvider(MemoryProvider):
         if self._recall_min_scores:
             kwargs["min_scores"] = self._recall_min_scores
 
+        def _in(bank_id: str) -> dict:
+            audiences = self._recall_audiences(bank_id)
+            return {**kwargs, "tags": audiences, "tags_match": "any_strict"} if audiences else kwargs
+
         async def _recall_all(client):
             extra_timeout = float(self._timeout or _DEFAULT_TIMEOUT) * _EXTRA_BANK_TIMEOUT_SHARE
-            primary = asyncio.ensure_future(client.arecall(bank_id=bank_ids[0], **kwargs))
+            primary = asyncio.ensure_future(client.arecall(bank_id=bank_ids[0], **_in(bank_ids[0])))
             extras = [
-                asyncio.ensure_future(asyncio.wait_for(client.arecall(bank_id=bank_id, **kwargs), extra_timeout))
+                asyncio.ensure_future(asyncio.wait_for(client.arecall(bank_id=bank_id, **_in(bank_id)), extra_timeout))
                 for bank_id in bank_ids[1:]
             ]
             try:
@@ -1785,6 +1850,8 @@ class HindsightMemoryProvider(MemoryProvider):
             kwargs: Dict[str, Any] = {"bank_id": bank, "query": query, "budget": self._budget}
             if self._reflect_tags:
                 kwargs.update(tags=self._reflect_tags, tags_match=self._reflect_tags_match)
+            if audiences := self._recall_audiences(bank):
+                kwargs.update(tags=audiences, tags_match="any_strict")
             try:
                 resp = self._run_hindsight_operation(lambda client, kwargs=kwargs: client.areflect(**kwargs))
             except Exception as exc:
@@ -1913,7 +1980,11 @@ class HindsightMemoryProvider(MemoryProvider):
     def _audience_tags(self) -> List[str]:
         if not getattr(self, "_audience", False):
             return []
-        return [f"by:{self._speaker}", *([f"agent:{self._agent_identity}"] if self._agent_identity else [])]
+        return [
+            f"by:{self._speaker}",
+            *([f"agent:{self._agent_identity}"] if self._agent_identity else []),
+            *([self._shared_with] if self._shared_with else []),
+        ]
 
     def _build_metadata(self, *, message_count: int, turn_index: int) -> Dict[str, str]:
         metadata: Dict[str, str] = {
@@ -2149,6 +2220,8 @@ class HindsightMemoryProvider(MemoryProvider):
             return "Memory queued for storage." if self._retain_async else "Memory stored successfully."
         wanted = args.get("for") or "me"
         bank = _SAVE_TARGETS.get(wanted) if self._inside else None
+        kept_here = bank == PUBLIC_BANK and self._shared_with not in (EVERYONE_INSIDE, OWNERS_OWN)
+        bank = None if kept_here else bank
         bank = bank or self._bank_id
         item = self._build_retain_kwargs(
             content,
@@ -2161,6 +2234,11 @@ class HindsightMemoryProvider(MemoryProvider):
         if self._retain_async:
             self._track_retain_ops(resp, bank)
         logger.info("Memory: person=%s save for=%s -> %s", self._person, wanted, bank)
+        if kept_here:
+            return (
+                "Saved only for the people in this conversation: what is said here stays with them, so it "
+                "cannot be saved for everyone from here. Do not tell them it was saved for others."
+            )
         if not self._inside and wanted != "me":
             return (
                 "Saved only in this person's own memory: they are not one of the company's own people, "

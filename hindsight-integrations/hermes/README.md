@@ -361,6 +361,7 @@ These are used whenever the matching config key is not set:
 | `HINDSIGHT_EMBED_PORT_HEALTH_GRACE_TIMEOUT` | Daemon health-check grace in seconds; wins over `port_health_grace_timeout` |
 | `HINDSIGHT_RETAIN_TAGS` | Default tags on retained memories (`retain_tags`) |
 | `HINDSIGHT_RETAIN_OBSERVATION_SCOPES` | Observation scopes (`observation_scopes`) |
+| `HINDSIGHT_AUDIENCE_RESOLVER` | With `HINDSIGHT_INSIDE_PLATFORMS`, `module:function` asked whether everyone in the company can read an inside conversation (`audience_resolver`): it is called with `platform`, `chat_id` and `setting` (the profile's scoped setting reader) and returns `True` or `False`. Each company memory is tagged `audience:company`, `audience:<platform>:<chat_id>` (the conversation's own people; also when the resolver fails) or `audience:installation` (the owner's window, terminal and scheduled tasks); an inside conversation recalls the company memory only with `audience:company` and its own tag (`any_strict`), and the owner recalls every audience. Pair it with `observation_scopes` `[["audience:*"]]` so an observation stays within one audience |
 | `HINDSIGHT_RETAIN_SOURCE` | `metadata.source` on retained memories (`retain_source`) |
 | `HINDSIGHT_RETAIN_STRATEGY` | Named retain strategy (`retain_strategy`) |
 | `HINDSIGHT_RETAIN_USER_PREFIX` | Label before user turns (`retain_user_prefix`) |
