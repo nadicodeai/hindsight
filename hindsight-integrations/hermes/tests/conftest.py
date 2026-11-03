@@ -33,7 +33,8 @@ def _get_secret(name: str, default: str = "") -> str:
 
 
 class MemoryProvider:  # the Hermes base class, reduced to what the plugin overrides
-    pass
+    def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
+        pass
 
 
 @dataclass
