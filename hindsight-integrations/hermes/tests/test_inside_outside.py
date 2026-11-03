@@ -398,6 +398,27 @@ def test_a_conversation_whose_audience_cannot_be_read_keeps_to_itself(provider, 
     assert _tags(fake) == [{"audience:buzz:general"}]
 
 
+def test_a_channel_made_private_during_a_session_keeps_what_is_said_after_with_its_people(provider, monkeypatch):
+    open_now = {"general": True}
+    monkeypatch.setitem(
+        sys.modules,
+        "company_audiences",
+        types.SimpleNamespace(open_to_everyone=lambda platform, chat_id, setting: open_now[chat_id]),
+    )
+    instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id="general", chat_type="group")
+    instance.on_turn_start(1, "Bonuses arrive on 27 November")
+    instance.sync_turn("Bonuses arrive on 27 November", "Noted.")
+    open_now["general"] = False
+    instance.on_turn_start(2, "Marco leaves in March")
+    instance.sync_turn("Marco leaves in March", "Noted.")
+    instance.handle_tool_call("long_term_memory_search", {"query": "Marco"})
+    instance.shutdown()
+    assert _tags(fake) == [{"audience:company"}, {"audience:buzz:general"}]
+    assert _filters(fake)[0] == ("company", ("audience:company", "audience:buzz:general"), "any_strict")
+    first, second = (call["document_id"] for call in fake.retains)
+    assert first != second
+
+
 def test_a_save_for_everyone_from_a_private_conversation_stays_with_its_people(provider, open_channels):
     instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id="paghe", chat_type="group")
     result = json.loads(

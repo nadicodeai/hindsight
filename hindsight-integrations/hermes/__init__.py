@@ -1254,8 +1254,15 @@ class HindsightMemoryProvider(MemoryProvider):
         url = self._embedded_url if self._mode == "local_embedded" else None
         probe_url = str(url) if url else (self._api_url or "")
         if self._session_id and _check_api_supports_update_mode_append(probe_url, self._api_key):
-            return self._session_id, "append"
+            return self._audience_document(self._session_id), "append"
         return fallback_document_id, None
+
+    def _audience_document(self, document_id: str) -> str:
+        """An append reprocesses the whole document under the newest turn's tags, so each audience
+        of an inside conversation keeps its own document and no turn takes another audience's tag."""
+        if not getattr(self, "_audience", False) or self._shared_with in ("", OWNERS_OWN):
+            return document_id
+        return f"{document_id}:{self._shared_with}"
 
     # -- lifecycle ---------------------------------------------------------------
 
@@ -1482,6 +1489,25 @@ class HindsightMemoryProvider(MemoryProvider):
             logger.warning("Memory: the audience of %s could not be read, so it stays its own: %r", own, exc)
             return own
         return EVERYONE_INSIDE if open_to_everyone is True else own
+
+    def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
+        """A member can open or close a channel while the session lasts, so its audience is read
+        again on every turn. Turns kept under the previous audience leave first, under its tag, and
+        a recall made for it is dropped."""
+        if not getattr(self, "_audience", False) or self._shared_with in ("", OWNERS_OWN):
+            return
+        now = self._conversation_audience(self._config.get("audience_resolver"))
+        if now == self._shared_with:
+            return
+        self._flush_buffered_turns("flush-on-audience")
+        with self._prefetch_lock:
+            self._prefetch_generation += 1
+            self._prefetch_result, self._prefetch_count = "", 0
+        logger.info("Memory: %s is now shared with %s", self._shared_with, now)
+        self._shared_with = now
+        self._document_id = _mint_document_id(self._session_id)
+        self._session_turns = []
+        self._last_retained_turn_count = 0
 
     def _recall_audiences(self, bank: str) -> list[str] | None:
         """The audiences a recall in *bank* may return: every one for the owner and outside the
