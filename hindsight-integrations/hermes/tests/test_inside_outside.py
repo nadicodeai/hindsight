@@ -324,7 +324,11 @@ def test_a_deliberate_save_keeps_who_talks_to_whom_and_the_agent_cannot_name_who
     instance, fake = provider(owner, platform="desktop")
     instance.handle_tool_call(
         "long_term_memory_save",
-        {"content": "Rossi pays at 90 days", "context": "payment terms", "tags": ["by:Mario", "agent:other", "invoices"]},
+        {
+            "content": "Rossi pays at 90 days",
+            "context": "payment terms",
+            "tags": ["by:Mario", "agent:other", "invoices"],
+        },
     )
     instance.shutdown()
     item = fake.retains[0]["items"][0]
@@ -356,7 +360,10 @@ def _tags(fake: FakeClient) -> list[set[str]]:
 
 
 def _filters(fake: FakeClient) -> list[tuple[str, tuple[str, ...] | None, str | None]]:
-    return [(call["bank_id"], tuple(call["tags"]) if call.get("tags") else None, call.get("tags_match")) for call in fake.recalls]
+    return [
+        (call["bank_id"], tuple(call["tags"]) if call.get("tags") else None, call.get("tags_match"))
+        for call in fake.recalls
+    ]
 
 
 @pytest.mark.parametrize(
@@ -368,7 +375,9 @@ def _filters(fake: FakeClient) -> list[tuple[str, tuple[str, ...] | None, str | 
     ],
     ids=["an open channel", "a private channel", "a direct message"],
 )
-def test_an_inside_conversation_keeps_and_recalls_within_its_audience(provider, open_channels, chat, chat_type, kept, recalled):
+def test_an_inside_conversation_keeps_and_recalls_within_its_audience(
+    provider, open_channels, chat, chat_type, kept, recalled
+):
     instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id=chat, chat_type=chat_type)
     instance.sync_turn("Bonuses arrive on 27 November", "Noted.")
     instance.handle_tool_call("long_term_memory_search", {"query": "bonuses"})
@@ -474,7 +483,8 @@ def test_a_save_for_everyone_from_a_private_conversation_stays_with_its_people(p
     instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id="paghe", chat_type="group")
     result = json.loads(
         instance.handle_tool_call(
-            "long_term_memory_save", {"content": "Bonuses arrive on 27 November", "for": "everyone", "tags": ["audience:company"]}
+            "long_term_memory_save",
+            {"content": "Bonuses arrive on 27 November", "for": "everyone", "tags": ["audience:company"]},
         )
     )
     instance.shutdown()
