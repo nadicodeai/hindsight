@@ -34,21 +34,33 @@ async def api_client(memory):
         yield client
 
 
-async def _insert_fact(memory: MemoryEngine, bank_id: str, text: str) -> str:
-    """Insert one world fact with a real embedding; returns its id."""
+async def _insert_fact(
+    memory: MemoryEngine, bank_id: str, text: str, *, fact_type: str = "world", document_id: str | None = None
+) -> str:
+    """Insert one fact with a real embedding, drawn from *document_id* when given; returns its id."""
     await memory.ensure_bank_profile(bank_id=bank_id, request_context=RequestContext())
     emb = await embedding_processing.generate_embeddings_batch(memory.embeddings, [text])
     mem_id = uuid.uuid4()
     pool = await memory._get_pool()
     async with pool.acquire() as conn:
+        if document_id is not None:
+            await conn.execute(
+                "INSERT INTO documents (id, bank_id, original_text, content_hash) VALUES ($1, $2, $3, 'h') "
+                "ON CONFLICT DO NOTHING",
+                document_id,
+                bank_id,
+                text,
+            )
         await conn.execute(
             """
-            INSERT INTO memory_units (id, bank_id, text, fact_type, embedding, event_date, created_at, updated_at, consolidated_at)
-            VALUES ($1, $2, $3, 'world', $4::vector, NOW(), NOW(), NOW(), NOW())
+            INSERT INTO memory_units (id, bank_id, text, fact_type, document_id, embedding, event_date, created_at, updated_at, consolidated_at)
+            VALUES ($1, $2, $3, $4, $5, $6::vector, NOW(), NOW(), NOW(), NOW())
             """,
             mem_id,
             bank_id,
             text,
+            fact_type,
+            document_id,
             str(emb[0]),
         )
     return str(mem_id)
@@ -224,3 +236,35 @@ async def test_a_listed_memory_carries_when_it_was_stored_even_when_no_mention_t
     assert [(item["id"], item["mentioned_at"], item["created_at"]) for item in listed] == [
         (stored, None, created.isoformat())
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
+async def test_a_document_is_deleted_with_the_last_memory_drawn_from_it(api_client, memory):
+    bank_id = f"curation-http-{uuid.uuid4().hex[:8]}"
+    first = await _insert_fact(memory, bank_id, "Anna's client code is AC-4471.", document_id="call-notes")
+    second = await _insert_fact(memory, bank_id, "Anna works in Treviso.", document_id="call-notes")
+    document = f"/v1/default/banks/{bank_id}/documents/call-notes"
+
+    assert (await api_client.delete(f"/v1/default/banks/{bank_id}/memories/{first}")).status_code == 204
+    assert (await api_client.get(document)).status_code == 200
+    assert (await api_client.delete(f"/v1/default/banks/{bank_id}/memories/{second}")).status_code == 204
+    assert (await api_client.get(document)).status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.memory_backend_incompatible
+async def test_the_memory_list_takes_several_fact_types(api_client, memory):
+    bank_id = f"curation-http-{uuid.uuid4().hex[:8]}"
+    world = await _insert_fact(memory, bank_id, "Anna works in Treviso.")
+    experience = await _insert_fact(memory, bank_id, "I sent Anna the invoice.", fact_type="experience")
+    await _insert_fact(memory, bank_id, "Anna is a long-standing client.", fact_type="observation")
+
+    async def listed(*types: str) -> set[str]:
+        params = [("type", fact_type) for fact_type in types]
+        answered = await api_client.get(f"/v1/default/banks/{bank_id}/memories/list", params=params)
+        assert answered.status_code == 200
+        return {item["id"] for item in answered.json()["items"]}
+
+    assert await listed("world", "experience") == {world, experience}
+    assert await listed("world") == {world}
