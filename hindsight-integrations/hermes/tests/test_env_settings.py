@@ -68,7 +68,9 @@ def test_the_names_and_scheduled_runs_set_in_the_environment_reach_a_profile_wit
     config_path = hermes_env / "hindsight" / "config.json"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text('{"mode": "cloud", "apiKey": "test-key", "agent_name": "Old"}')
-    SECRETS.update({"HINDSIGHT_COMPANY_NAME": "FIS Impianti", "HINDSIGHT_AGENT_NAME": "Sofia", "HINDSIGHT_RETAIN_CRON": "true"})
+    SECRETS.update(
+        {"HINDSIGHT_COMPANY_NAME": "FIS Impianti", "HINDSIGHT_AGENT_NAME": "Sofia", "HINDSIGHT_RETAIN_CRON": "true"}
+    )
     loaded = plugin._load_config()
     for name in ("HINDSIGHT_COMPANY_NAME", "HINDSIGHT_AGENT_NAME", "HINDSIGHT_RETAIN_CRON"):
         SECRETS.pop(name)
