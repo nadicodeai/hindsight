@@ -49,9 +49,9 @@ def test_a_turn_written_by_another_agent_is_labelled_with_that_agent(provider):
     instance.shutdown()
 
     roles = [m["role"] for m in json.loads(_retain_item(fake)["content"])]
-    assert roles == ["CI Agent", "assistant", "Another agent", "assistant", "user", "assistant"]
+    assert roles == ["Another agent", "assistant", "Another agent", "assistant", "user", "assistant"]
     assert _messages_of(fake) == [
-        "CI Agent: deploy is done",
+        "Another agent (CI Agent): deploy is done",
         "Assistant: Thanks.",
         "Another agent: ping",
         "Assistant: pong",

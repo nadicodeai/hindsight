@@ -177,18 +177,18 @@ def _tool_call_lines(messages: List[Any] | None) -> List[str]:
     return lines
 
 
-_RESERVED_ROLES = frozenset({"user", "assistant", "system", "tool", "developer"})
-
-
 def _bot_label(turn_author: Dict[str, Any] | None) -> str | None:
     """The label for a turn another agent wrote, from Hermes' ``turn_author`` ({"id", "name",
-    "is_bot"}); None when a human wrote it or Hermes sent nothing. "Another agent" when it has no usable name."""
+    "is_bot"}); None when a human wrote it or Hermes sent nothing. Its role is always "Another
+    agent" and her name, one short line as a person's is, only stands beside it, so no name, however
+    spelt, reads as the person's or this agent's own turn."""
     if not (isinstance(turn_author, dict) and turn_author.get("is_bot")):
         return None
-    # The name becomes the message's role and label: one short line, as a person's name is, and never
-    # a role the transcript gives the user, the agent or a tool.
     name = _spoken_name(turn_author.get("name"))
-    return "Another agent" if not name or name.casefold() in _RESERVED_ROLES else name
+    return f"{_ANOTHER_AGENT} ({name})" if name else _ANOTHER_AGENT
+
+
+_ANOTHER_AGENT = "Another agent"
 
 
 # How long a turn waits for the background recall before it goes ahead without memory.
@@ -2649,13 +2649,7 @@ class HindsightMemoryProvider(MemoryProvider):
         named = getattr(self, "_audience", False)
         user_prefix = self._speaker if named else self._retain_user_prefix
         assistant_prefix = self._agent_name if named else self._retain_assistant_prefix
-        if bot_label is not None and bot_label.casefold() in {
-            str(name).casefold()
-            for name in (user_prefix, assistant_prefix, self._retain_user_prefix, self._retain_assistant_prefix)
-        }:
-            # Never the label of the person or the agent of this conversation: the turn would read as theirs.
-            bot_label = "Another agent"
-        user_role, user_label = ("user", user_prefix) if bot_label is None else (bot_label, bot_label)
+        user_role, user_label = ("user", user_prefix) if bot_label is None else (_ANOTHER_AGENT, bot_label)
         messages = [{"role": user_role, "content": f"{user_label}: {user_content}", "timestamp": now}]
         if tool_calls:
             messages.append({"role": "tool", "content": "\n".join(tool_calls), "timestamp": now})
