@@ -664,3 +664,25 @@ def test_another_agent_s_name_is_one_short_line_and_never_a_reserved_role(provid
     first = json.loads(fake.retains[0]["items"][0]["content"])[0]
     assert first["role"] == label
     assert first["content"] == f"{label}: hello"
+
+
+def test_a_configured_tag_that_only_becomes_an_audience_once_filled_and_trimmed_is_dropped(provider, open_channels):
+    instance, fake = provider(
+        {**AUDIENCES, "retain_tags": ["{chat: >3.0}audience:company"]},
+        platform="buzz",
+        user_id="ab12",
+        user_name="Marco",
+        chat_id="x",
+    )
+    instance.sync_turn("The quote for Rossi is 12k", "Noted.")
+    instance.shutdown()
+
+    assert "audience:company" not in fake.retains[0]["items"][0]["tags"]
+
+
+def test_a_page_tool_never_offered_is_refused_when_called(provider):
+    instance, fake = provider(INSIDE, platform="buzz", user_id="ab12")
+    answer = instance.handle_tool_call("hindsight_list_pages", {})
+    instance.shutdown()
+
+    assert "Unknown tool" in answer

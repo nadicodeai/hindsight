@@ -340,3 +340,24 @@ def test_an_operation_the_server_no_longer_holds_is_settled(provider):
 
     assert client.retried == []
     assert len(instance._unsettled_retain_ops) <= 1
+
+
+def test_with_audiences_saves_unsent_at_exit_are_not_kept_on_disk(provider, hermes_env):
+    """Spooled, a conversation would be sent after its contact was forgotten, from whichever home the
+    process exited in: with inside_platforms set it is dropped at exit, as before 2.0.0."""
+    _spool_one(provider, hermes_env)
+    instance, _ = provider(
+        {"inside_platforms": "buzz", "prefetch_waits_for_retain": False},
+        client=FlakyClient(failures=10_000),
+        platform="buzz",
+        user_id="ab12",
+    )
+    instance.sync_turn("left over in a private channel", "reply")
+    instance._retain_queue.join()
+    instance.shutdown()
+    up = FlakyClient()
+    second, _ = provider({"inside_platforms": "buzz"}, client=up, platform="buzz", user_id="ab12")
+    second.shutdown()
+
+    assert len(list((hermes_env / "hindsight" / "unsent-retains").glob("*.json"))) == 1
+    assert up.retains == []

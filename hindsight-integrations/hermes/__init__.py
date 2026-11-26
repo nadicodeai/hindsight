@@ -639,6 +639,7 @@ _PAGE_GUIDANCE = (
     " Use hindsight_search_pages for where something stands or what was decided: pages are "
     "organized, kept-current summaries."
 )
+_PAGE_READ_TOOLS = frozenset({"hindsight_search_pages", "hindsight_read_page", "hindsight_list_pages"})
 _PAGE_SNIPPET_CHARS = 200
 _PAGE_LIST_MAX_LINES = 100
 
@@ -2145,9 +2146,6 @@ class HindsightMemoryProvider(MemoryProvider):
             return cfg.get(key) or _scoped_setting(env_var, default)
 
         self._retain_tags = self._tag_setting(_cfg_or_env("retain_tags", "HINDSIGHT_RETAIN_TAGS"))
-        if getattr(self, "_audience", False):
-            # Who said it, to which agent and who may read it are the provider's to write, as for a tool's tags.
-            self._retain_tags = [tag for tag in self._retain_tags if not tag.startswith(_PROVENANCE)]
         self._tags = self._retain_tags or None
         self._observation_scopes = _normalize_observation_scopes(
             _cfg_or_env("observation_scopes", "HINDSIGHT_RETAIN_OBSERVATION_SCOPES", _DEFAULT_OBSERVATION_SCOPES)
@@ -2712,7 +2710,12 @@ class HindsightMemoryProvider(MemoryProvider):
             "metadata": metadata or self._build_metadata(message_count=1, turn_index=self._turn_index),
             "timestamp": (occurred_at or "").strip() or _event_timestamp(),
         }
-        merged_tags = _normalize_string_list(list(self._retain_tags) + _normalize_string_list(tags))
+        configured = _normalize_string_list(list(self._retain_tags))
+        if getattr(self, "_audience", False):
+            # Who said it, to which agent and who may read it are the provider's to write: a configured tag
+            # is checked as the server receives it, after its placeholders are filled and it is trimmed.
+            configured = [tag for tag in configured if not tag.startswith(_PROVENANCE)]
+        merged_tags = _normalize_string_list(configured + _normalize_string_list(tags))
         item.update({k: v for k, v in (("context", context), ("update_mode", update_mode)) if v is not None})
         item.update({k: v for k, v in (("tags", merged_tags), ("observation_scopes", self._observation_scopes)) if v})
         # Per-item strategy: overrides the bank default for this item only. Omitted when
@@ -3181,7 +3184,7 @@ class HindsightMemoryProvider(MemoryProvider):
     }
 
     def handle_tool_call(self, tool_name: str, args: dict, **kwargs) -> str:
-        if tool_name not in self._TOOL_HANDLERS:
+        if tool_name not in self._TOOL_HANDLERS or (tool_name in _PAGE_READ_TOOLS and not self._page_tools):
             return tool_error(f"Unknown tool: {tool_name}")
         required, handler, failure = self._TOOL_HANDLERS[tool_name]
         for name in required:
@@ -3338,6 +3341,11 @@ class HindsightMemoryProvider(MemoryProvider):
                 unsent.append(job)
         if not unsent:
             return
+        if getattr(self, "_audience", False):
+            # A spooled conversation would outlive the rules that place it: written into whichever home the
+            # process exits in, and sent after its contact was forgotten. So it goes, as before 2.0.0.
+            logger.warning("Nadia long-term memory: %d save(s) not sent before stopping are lost", len(unsent))
+            return
         folder = get_hermes_home().joinpath(*_UNSENT_RETAINS_DIR)
         try:
             folder.mkdir(parents=True, exist_ok=True)
@@ -3357,6 +3365,8 @@ class HindsightMemoryProvider(MemoryProvider):
     def _resend_unsent_retains(self) -> None:
         """Queue the retains an earlier session could not send before it exited (#6915). Each
         file is claimed by renaming it first, so two sessions starting together never both send it."""
+        if getattr(self, "_audience", False):
+            return
         folder = get_hermes_home().joinpath(*_UNSENT_RETAINS_DIR)
         for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
             claimed = path.with_suffix(f".claimed-{os.getpid()}-{uuid.uuid4().hex[:8]}")
