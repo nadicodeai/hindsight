@@ -179,9 +179,7 @@ def _tool_call_lines(messages: List[Any] | None) -> List[str]:
 
 def _bot_label(turn_author: Dict[str, Any] | None) -> str | None:
     """The label for a turn another agent wrote, from Hermes' ``turn_author`` ({"id", "name",
-    "is_bot"}); None when a human wrote it or Hermes sent nothing. Its role is always "Another
-    agent" and her name, one short line as a person's is, only stands beside it, so no name, however
-    spelt, reads as the person's or this agent's own turn."""
+    "is_bot"}); None when a human wrote it or Hermes sent nothing."""
     if not (isinstance(turn_author, dict) and turn_author.get("is_bot")):
         return None
     name = _spoken_name(turn_author.get("name"))
@@ -674,16 +672,7 @@ _BANK_LABELS = {TEAM_BANK: "the team's knowledge", PUBLIC_BANK: "public knowledg
 # read (Buzz's information-flow rule: a memory m is read in conversation D only when A(D) ⊆ R(m)). What
 # the owner's own conversations keep (the window, a terminal, a scheduled task) is the installation's.
 # An inside conversation is its own audience, unless the ``audience_resolver`` answers that everyone in
-# the company can read it. Every conversation, the owner's included, recalls what everyone in the company
-# may read and its own audience, nothing else: what it says can be summarised for the company, so it must
-# not carry another audience's memories there. A scheduled task's result can be delivered anywhere, so it
-# recalls only what everyone in the company may read.
-#
-# Summaries (observations) are the provider's to place: each audience's are its own, and what a
-# colleague tells an agent in a direct message, or the owner keeps, is also summarised for the whole
-# company, under the server's brief for the ``audience:company`` scope, which keeps the work and leaves
-# a person's private matters out. A private channel's summaries stay its own: the company chose who
-# reads it. An outside person's bank is theirs alone, so their memories share one set of summaries.
+# the company can read it.
 AUDIENCE = "audience:"
 EVERYONE_INSIDE = AUDIENCE + "company"
 OWNERS_OWN = AUDIENCE + "installation"
@@ -2034,22 +2023,22 @@ class HindsightMemoryProvider(MemoryProvider):
             self._shared_with = now
 
     def _recall_audiences(self, bank: str, audience: str) -> list[str] | None:
-        """The audiences a recall in *bank* may return: every one outside the company's bank, what
-        everyone in the company may read for a scheduled task, else that and this conversation's own."""
         if bank != TEAM_BANK or not getattr(self, "_audience", False) or not audience:
             return None
-        if getattr(self, "_agent_context", "primary") == "cron":
+        if self._result_can_go_anywhere():
             return [EVERYONE_INSIDE]
         return list(dict.fromkeys((EVERYONE_INSIDE, audience)))
 
+    def _result_can_go_anywhere(self) -> bool:
+        return getattr(self, "_agent_context", "primary") == "cron"
+
     def _observation_scopes_of(self, audience: str) -> Any:
-        """Where the summaries of what is said with *audience* go: its own audience's, and the company's
-        too when a colleague says it to an agent alone or the owner keeps it; one set for an outside
-        person's bank."""
         if not audience:
             return "shared"
-        teaches = audience == OWNERS_OWN or (audience != EVERYONE_INSIDE and self._chat_type == "dm")
-        return [[audience], [EVERYONE_INSIDE]] if teaches else [[audience]]
+        kept_by_the_owner = audience == OWNERS_OWN
+        said_to_an_agent_alone = audience != EVERYONE_INSIDE and self._chat_type == "dm"
+        also_the_company_s = kept_by_the_owner or said_to_an_agent_alone
+        return [[audience], [EVERYONE_INSIDE]] if also_the_company_s else [[audience]]
 
     def _bank_label(self, bank: str) -> str:
         return _BANK_LABELS.get(bank) or ("this person's own memory" if bank == self._bank_id else f"the memory {bank}")
@@ -2396,7 +2385,7 @@ class HindsightMemoryProvider(MemoryProvider):
         if not getattr(self, "_audience", False) or not getattr(self, "_shared_with", ""):
             return ""
         if self._shared_with == OWNERS_OWN:
-            if getattr(self, "_agent_context", "primary") == "cron":
+            if self._result_can_go_anywhere():
                 return ""
             return (
                 f"\n\n# What you can use from memory\nYou use what everyone at {self._company} can read and what was "
@@ -2739,9 +2728,7 @@ class HindsightMemoryProvider(MemoryProvider):
     ) -> Dict[str, Any]:
         """Build one aretain_batch item. The server resolves occurred_start/end (incl.
         relative phrases in content) from the item timestamp: explicit occurred_at
-        wins, else the configured event clock. *audience* is where it was said, with
-        inside_platforms set: the provider's own by:, agent: and audience: tags and observation
-        scopes follow from it, and every other tag, configured or passed, loses any that names one."""
+        wins, else the configured event clock."""
         item: Dict[str, Any] = {
             # See #93568.
             "content": content,
