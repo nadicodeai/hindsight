@@ -508,7 +508,9 @@ These are used **only when there is no config file at all**. Once `hermes memory
 One exception: a variable the administrator's managed `.env` pins (Hermes's `managed_dotenv_keys`) wins
 over the config file, for `mode`, `retain_tags`, `retain_context`, the two indicators, `recall_sync`,
 `recall_cron`, `recall_query_strip_patterns`, `recall_max_tokens_mode`, `inside_platforms`,
-`observation_scopes`, `retain_cron` and `audience_resolver`, so no profile's file can undo them.
+`observation_scopes`, `retain_cron`, `audience_resolver` and `api_url`, so no profile's file can undo them, a `chats`
+entry included. With `inside_platforms` set, a configured retain tag cannot begin with `by:`, `agent:` or `audience:`:
+who said a memory, to which agent and who may read it are the provider's to write.
 
 ## Client Version
 

@@ -712,6 +712,7 @@ _MANAGEABLE_SETTINGS = {
     "recall_cron": "HINDSIGHT_RECALL_CRON",
     "recall_query_strip_patterns": "HINDSIGHT_RECALL_QUERY_STRIP_PATTERNS",
     "recall_max_tokens_mode": "HINDSIGHT_RECALL_MAX_TOKENS_MODE",
+    "api_url": "HINDSIGHT_API_URL",
 }
 _IDENTITY_SETTINGS = ("company_name", "owner_name", "agent_name")
 _PROVENANCE = ("by:", "agent:", AUDIENCE)
@@ -741,6 +742,17 @@ def _load_config() -> dict:
         # A corrupt (or empty) file falls through to the next source, as before the dedup.
         if path.exists() and (data := read_json_or_empty(path)):
             pinned_settings = {key: from_env[key] for key, name in _MANAGEABLE_SETTINGS.items() if name in pinned}
+            if isinstance(data.get("chats"), dict):
+                # A chats entry is laid over these settings later, so it loses the pinned keys here.
+                data = {
+                    **data,
+                    "chats": {
+                        chat: {k: v for k, v in entry.items() if k not in pinned_settings}
+                        if isinstance(entry, dict)
+                        else entry
+                        for chat, entry in data["chats"].items()
+                    },
+                }
             return {**data, **pinned_settings, **{key: from_env[key] for key in _IDENTITY_SETTINGS if from_env[key]}}
     return from_env
 
@@ -752,6 +764,7 @@ def _env_config() -> dict:
     return {
         "mode": get_secret("HINDSIGHT_MODE", "") or "cloud",
         "apiKey": get_secret("HINDSIGHT_API_KEY", ""),
+        "api_url": get_secret("HINDSIGHT_API_URL", "") or "",
         "timeout": _parse_int_setting(os.environ.get("HINDSIGHT_TIMEOUT"), _DEFAULT_TIMEOUT),
         "idle_timeout": _parse_int_setting(os.environ.get("HINDSIGHT_IDLE_TIMEOUT"), _DEFAULT_IDLE_TIMEOUT),
         "retain_tags": get_secret("HINDSIGHT_RETAIN_TAGS", "") or "",
@@ -2126,6 +2139,9 @@ class HindsightMemoryProvider(MemoryProvider):
             return cfg.get(key) or _scoped_setting(env_var, default)
 
         self._retain_tags = self._tag_setting(_cfg_or_env("retain_tags", "HINDSIGHT_RETAIN_TAGS"))
+        if getattr(self, "_audience", False):
+            # Who said it, to which agent and who may read it are the provider's to write, as for a tool's tags.
+            self._retain_tags = [tag for tag in self._retain_tags if not tag.startswith(_PROVENANCE)]
         self._tags = self._retain_tags or None
         self._observation_scopes = _normalize_observation_scopes(
             _cfg_or_env("observation_scopes", "HINDSIGHT_RETAIN_OBSERVATION_SCOPES", _DEFAULT_OBSERVATION_SCOPES)

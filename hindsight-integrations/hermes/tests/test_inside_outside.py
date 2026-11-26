@@ -591,3 +591,40 @@ def test_the_managed_env_pins_cron_recall_its_query_lines_and_one_budget_for_eve
 
     assert [call["query"] for call in fake.recalls] == ["Send the weekly quotes"] * 2
     assert [call["max_tokens"] for call in fake.recalls] == [500, 500]
+
+
+def test_a_chats_entry_cannot_undo_what_the_managed_env_pins(hermes_env, monkeypatch):
+    pins = {"HINDSIGHT_INSIDE_PLATFORMS": "buzz", "HINDSIGHT_API_URL": "http://127.0.0.1:47842"}
+    __import__("conftest").SECRETS.update(pins)
+    monkeypatch.setitem(
+        sys.modules, "hermes_cli.env_loader", types.SimpleNamespace(managed_dotenv_keys=lambda: frozenset(pins))
+    )
+    (hermes_env / "hindsight").mkdir()
+    entry = {"inside_platforms": "", "api_url": "https://elsewhere.example", "bank_id": "company", "budget": "low"}
+    (hermes_env / "hindsight" / "config.json").write_text(
+        json.dumps({"mode": "local_external", "api_url": "https://elsewhere.example", "chats": {"buzz/sales": entry}}),
+        encoding="utf-8",
+    )
+
+    cfg = plugin._load_config()
+    route = plugin.resolve_chat_config(cfg, plugin.ChatScope("buzz", "sales"))
+
+    assert cfg["api_url"] == route.values["api_url"] == "http://127.0.0.1:47842"
+    assert route.values["inside_platforms"] == "buzz"
+    assert route.values["budget"] == "low"
+
+
+def test_a_configured_save_tag_cannot_say_who_may_read_a_memory(provider, open_channels):
+    instance, fake = provider(
+        {**AUDIENCES, "retain_tags": ["audience:company", "by:Owner", "project:alpha"]},
+        platform="buzz",
+        user_id="ab12",
+        user_name="Marco",
+        chat_id="sales",
+    )
+    instance.sync_turn("The quote for Rossi is 12k", "Noted.")
+    instance.shutdown()
+
+    tags = fake.retains[0]["items"][0]["tags"]
+    assert "audience:company" not in tags and "by:Owner" not in tags
+    assert {"project:alpha", "audience:buzz:sales", "by:Marco"} <= set(tags)
