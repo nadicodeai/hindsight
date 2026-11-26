@@ -2203,11 +2203,15 @@ class HindsightMemoryProvider(MemoryProvider):
         self._recall_split_tokens = cfg.get("recall_max_tokens_mode") == "split"
         self._recall_max_input_chars = _parse_int_setting(cfg.get("recall_max_input_chars"), 800)
         self._recall_query_strip_patterns = _compile_line_patterns(cfg.get("recall_query_strip_patterns"))
-        self._session_context_refs = _parse_session_context(cfg.get("session_context"))
-        self._page_tools = bool(cfg.get("page_tools", True))
+        # A page or a mental model is written from the whole bank, every audience's memories together,
+        # while an inside conversation reads only what its audience may: with inside_platforms set,
+        # neither reaches the agent.
+        whole_bank = not getattr(self, "_audience", False)
+        self._session_context_refs = _parse_session_context(cfg.get("session_context")) if whole_bank else []
+        self._page_tools = whole_bank and bool(cfg.get("page_tools", True))
         # Off by default: each page costs model calls on every refresh, so an agent that creates pages
         # on its own initiative runs up the user's bill.
-        self._page_create_tool = bool(cfg.get("page_create_tool", False))
+        self._page_create_tool = whole_bank and bool(cfg.get("page_create_tool", False))
         self._session_context_block: str | None = None  # read once, on the first system prompt
         # None -> every type, Hindsight's own recall default, with prefer_observations so an
         # observation replaces the raw facts it consolidated: a fact is recallable from its

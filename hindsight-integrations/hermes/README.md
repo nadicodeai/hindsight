@@ -372,7 +372,7 @@ Each recalled memory, in auto-recall and in the `long_term_memory_search` tool, 
 
 ### Pages
 
-Pages are documents Hindsight writes from the bank's memories and keeps up to date, each answering one question. The agent reaches them through tools only; nothing is injected automatically. To put a page in every session's system prompt, use `session_context`.
+Pages are documents Hindsight writes from the bank's memories and keeps up to date, each answering one question. The agent reaches them through tools only; nothing is injected automatically. To put a page in every session's system prompt, use `session_context`. With `inside_platforms` set, the page tools and `session_context` are off whatever their settings say: a page or a mental model is written from the whole bank, every audience's memories together, and an inside conversation reads only what its audience may.
 
 | Key | Default | Description |
 |-----|---------|-------------|

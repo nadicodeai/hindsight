@@ -514,3 +514,28 @@ def test_the_owner_is_told_nothing_about_audiences(provider, open_channels):
     block = instance.system_prompt_block()
     instance.shutdown()
     assert "Who can read this conversation" not in block
+
+
+class _PagesClient(FakeClient):
+    def __init__(self):
+        super().__init__()
+        self.reads: list[str] = []
+
+    async def aget_mental_model(self, *, bank_id, mental_model_id, detail):
+        self.reads.append(mental_model_id)
+        return types.SimpleNamespace(name="Company profile", content="what every channel said")
+
+
+@pytest.mark.parametrize("inside", [{}, INSIDE])
+def test_pages_and_session_context_never_reach_an_inside_conversation(provider, inside):
+    client = _PagesClient()
+    settings = {"page_tools": True, "page_create_tool": True, "session_context": "profile"}
+    instance, _ = provider({**inside, **settings}, client=client, platform="buzz", user_id="ab12")
+    names = {schema["name"] for schema in instance.get_tool_schemas()}
+    prompt = instance.system_prompt_block()
+    instance.shutdown()
+
+    offered = not inside
+    assert ({"hindsight_search_pages", "hindsight_read_page", "hindsight_create_page"} <= names) is offered
+    assert ("what every channel said" in prompt) is offered
+    assert client.reads == (["profile"] if offered else [])
