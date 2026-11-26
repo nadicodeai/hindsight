@@ -501,6 +501,14 @@ These are used **only when there is no config file at all**. Once `hermes memory
 | `HINDSIGHT_RETAIN_INDICATOR` | `false` hides the "Saving to Nadia long-term memory" status line (`retain_indicator`) |
 | `HINDSIGHT_RECALL_INDICATOR` | `false` hides the "recalled N memories" status line (`recall_indicator`) |
 | `HINDSIGHT_RECALL_SYNC` | `true` recalls against the current message before answering (`recall_sync`) |
+| `HINDSIGHT_RECALL_CRON` | `true` auto-recalls in scheduled (cron) runs too (`recall_cron`) |
+| `HINDSIGHT_RECALL_QUERY_STRIP_PATTERNS` | Lines to drop from the auto-recall query: a JSON list of regular expressions, or one per line (`recall_query_strip_patterns`) |
+| `HINDSIGHT_RECALL_MAX_TOKENS_MODE` | `split` shares `recall_max_tokens` across the banks one recall searches (`recall_max_tokens_mode`) |
+
+One exception: a variable the administrator's managed `.env` pins (Hermes's `managed_dotenv_keys`) wins
+over the config file, for `mode`, `retain_tags`, `retain_context`, the two indicators, `recall_sync`,
+`recall_cron`, `recall_query_strip_patterns`, `recall_max_tokens_mode`, `inside_platforms`,
+`observation_scopes`, `retain_cron` and `audience_resolver`, so no profile's file can undo them.
 
 ## Client Version
 

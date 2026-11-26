@@ -722,6 +722,9 @@ _MANAGEABLE_SETTINGS = {
     "observation_scopes": "HINDSIGHT_RETAIN_OBSERVATION_SCOPES",
     "retain_cron": "HINDSIGHT_RETAIN_CRON",
     "audience_resolver": "HINDSIGHT_AUDIENCE_RESOLVER",
+    "recall_cron": "HINDSIGHT_RECALL_CRON",
+    "recall_query_strip_patterns": "HINDSIGHT_RECALL_QUERY_STRIP_PATTERNS",
+    "recall_max_tokens_mode": "HINDSIGHT_RECALL_MAX_TOKENS_MODE",
 }
 _IDENTITY_SETTINGS = ("company_name", "owner_name", "agent_name")
 _PROVENANCE = ("by:", "agent:", AUDIENCE)
@@ -784,6 +787,9 @@ def _env_config() -> dict:
         "retain_indicator": _scoped_flag("HINDSIGHT_RETAIN_INDICATOR", True),
         "recall_indicator": _scoped_flag("HINDSIGHT_RECALL_INDICATOR", True),
         "recall_sync": _scoped_flag("HINDSIGHT_RECALL_SYNC", False),
+        "recall_cron": _scoped_flag("HINDSIGHT_RECALL_CRON", False),
+        "recall_query_strip_patterns": _scoped_setting("HINDSIGHT_RECALL_QUERY_STRIP_PATTERNS", ""),
+        "recall_max_tokens_mode": _scoped_setting("HINDSIGHT_RECALL_MAX_TOKENS_MODE", ""),
         "banks": {
             "hermes": {
                 "bankId": get_secret("HINDSIGHT_BANK_ID", "") or "hermes",

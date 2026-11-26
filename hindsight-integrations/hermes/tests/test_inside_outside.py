@@ -560,3 +560,34 @@ def test_a_required_checkpoint_is_refused_while_audiences_are_kept_apart(provide
     assert instance.on_pre_compress([{"role": "user", "content": "x"}]) == ""
     instance.shutdown()
     assert fake.retains == []
+
+
+def test_the_managed_env_pins_cron_recall_its_query_lines_and_one_budget_for_every_bank(
+    hermes_env, monkeypatch, provider
+):
+    pins = {
+        "HINDSIGHT_RECALL_CRON": "true",
+        "HINDSIGHT_RECALL_QUERY_STRIP_PATTERNS": '["^\\\\[IMPORTANT: You are running as a scheduled cron job"]',
+        "HINDSIGHT_RECALL_MAX_TOKENS_MODE": "split",
+    }
+    __import__("conftest").SECRETS.update(pins)
+    monkeypatch.setitem(
+        sys.modules, "hermes_cli.env_loader", types.SimpleNamespace(managed_dotenv_keys=lambda: frozenset(pins))
+    )
+    (hermes_env / "hindsight").mkdir()
+    (hermes_env / "hindsight" / "config.json").write_text(
+        json.dumps({"mode": "local_external", "recall_cron": False, "recall_max_tokens_mode": "per_bank"}),
+        encoding="utf-8",
+    )
+
+    cfg = plugin._load_config()
+    instance, fake = provider(
+        {**cfg, **INSIDE, "recall_sync": True, "recall_max_tokens": 1000}, agent_context="cron", platform="cron"
+    )
+    instance.prefetch(
+        "[IMPORTANT: You are running as a scheduled cron job. Deliver the report.]\nSend the weekly quotes"
+    )
+    instance.shutdown()
+
+    assert [call["query"] for call in fake.recalls] == ["Send the weekly quotes"] * 2
+    assert [call["max_tokens"] for call in fake.recalls] == [500, 500]
