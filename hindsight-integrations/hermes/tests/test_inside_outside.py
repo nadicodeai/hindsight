@@ -359,6 +359,10 @@ def _tags(fake: FakeClient) -> list[set[str]]:
     return [{tag for tag in call["items"][0]["tags"] if tag.startswith("audience:")} for call in fake.retains]
 
 
+def _scopes(fake: FakeClient) -> list[object]:
+    return [call["items"][0].get("observation_scopes") for call in fake.retains]
+
+
 def _filters(fake: FakeClient) -> list[tuple[str, tuple[str, ...] | None, str | None]]:
     return [
         (call["bank_id"], tuple(call["tags"]) if call.get("tags") else None, call.get("tags_match"))
@@ -367,22 +371,35 @@ def _filters(fake: FakeClient) -> list[tuple[str, tuple[str, ...] | None, str | 
 
 
 @pytest.mark.parametrize(
-    ("chat", "chat_type", "kept", "recalled"),
+    ("chat", "chat_type", "kept", "summarised", "recalled"),
     [
-        ("general", "group", "audience:company", ("audience:company",)),
-        ("paghe", "group", "audience:buzz:paghe", ("audience:company", "audience:buzz:paghe")),
-        ("dm-luca", "dm", "audience:buzz:dm-luca", ("audience:company", "audience:buzz:dm-luca")),
+        ("general", "group", "audience:company", [["audience:company"]], ("audience:company",)),
+        (
+            "paghe",
+            "group",
+            "audience:buzz:paghe",
+            [["audience:buzz:paghe"]],
+            ("audience:company", "audience:buzz:paghe"),
+        ),
+        (
+            "dm-luca",
+            "dm",
+            "audience:buzz:dm-luca",
+            [["audience:buzz:dm-luca"], ["audience:company"]],
+            ("audience:company", "audience:buzz:dm-luca"),
+        ),
     ],
     ids=["an open channel", "a private channel", "a direct message"],
 )
 def test_an_inside_conversation_keeps_and_recalls_within_its_audience(
-    provider, open_channels, chat, chat_type, kept, recalled
+    provider, open_channels, chat, chat_type, kept, summarised, recalled
 ):
     instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id=chat, chat_type=chat_type)
     instance.sync_turn("Bonuses arrive on 27 November", "Noted.")
     instance.handle_tool_call("long_term_memory_search", {"query": "bonuses"})
     instance.shutdown()
     assert _tags(fake) == [{kept}]
+    assert _scopes(fake) == [summarised]
     assert _filters(fake) == [("company", recalled, "any_strict"), ("public", None, None)]
     assert open_channels == [("buzz", chat)]
 
@@ -393,8 +410,32 @@ def test_the_owner_keeps_what_they_say_on_their_computer_and_recalls_every_audie
     instance.handle_tool_call("long_term_memory_search", {"query": "letterhead"})
     instance.shutdown()
     assert _tags(fake) == [{"audience:installation"}]
+    assert _scopes(fake) == [[["audience:installation"], ["audience:company"]]]
     assert _filters(fake) == [("company", None, None), ("public", None, None)]
     assert open_channels == []
+
+
+def test_a_scheduled_task_recalls_only_what_everyone_in_the_company_may_read(provider, open_channels):
+    instance, fake = provider({**AUDIENCES, "retain_cron": True}, agent_context="cron", platform="cron")
+    instance.sync_turn("Every morning: list the open quotes", "Three quotes are open.")
+    instance.handle_tool_call("long_term_memory_search", {"query": "open quotes"})
+    instance.handle_tool_call("long_term_memory_reflect", {"query": "open quotes"})
+    instance.shutdown()
+    assert _tags(fake) == [{"audience:installation"}]
+    assert _scopes(fake) == [[["audience:installation"], ["audience:company"]]]
+    assert _filters(fake) == [("company", ("audience:company",), "any_strict"), ("public", None, None)]
+    assert [(call["bank_id"], call.get("tags")) for call in fake.reflects] == [
+        ("company", ["audience:company"]),
+        ("public", None),
+    ]
+
+
+def test_an_outside_person_s_memories_share_one_set_of_summaries_whatever_is_configured(provider):
+    instance, fake = provider({**INSIDE, "observation_scopes": [["audience:*"]]}, platform="telegram", user_id="77")
+    instance.sync_turn("My order number is 4411", "Noted.")
+    instance.shutdown()
+    assert [call["bank_id"] for call in fake.retains] == ["person-telegram-77"]
+    assert _scopes(fake) == ["shared"]
 
 
 def test_a_conversation_whose_audience_cannot_be_read_keeps_to_itself(provider, monkeypatch):
@@ -494,12 +535,12 @@ def test_a_save_for_everyone_from_a_private_conversation_stays_with_its_people(p
 
 
 @pytest.mark.parametrize(
-    ("chat", "chat_name", "chat_type", "where"),
-    [("general", "general", "group", "#general"), ("dm-luca", "DM", "dm", "this direct message")],
+    ("chat", "chat_name", "chat_type", "where", "reaches_the_company"),
+    [("general", "general", "group", "#general", False), ("dm-luca", "DM", "dm", "this direct message", True)],
     ids=["a channel", "a direct message"],
 )
 def test_the_agent_is_told_she_uses_only_what_everyone_in_the_conversation_can_read(
-    provider, open_channels, chat, chat_name, chat_type, where
+    provider, open_channels, chat, chat_name, chat_type, where, reaches_the_company
 ):
     instance, _ = provider(
         AUDIENCES, platform="buzz", user_id="ab12", chat_id=chat, chat_name=chat_name, chat_type=chat_type
@@ -507,6 +548,7 @@ def test_the_agent_is_told_she_uses_only_what_everyone_in_the_conversation_can_r
     block = instance.system_prompt_block()
     instance.shutdown()
     assert f"you can only use what everyone in {where} can read" in block
+    assert ("also reaches the company's other agents" in block) is reaches_the_company
 
 
 def test_the_owner_is_told_nothing_about_audiences(provider, open_channels):

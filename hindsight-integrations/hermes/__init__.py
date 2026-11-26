@@ -674,8 +674,14 @@ _BANK_LABELS = {TEAM_BANK: "the team's knowledge", PUBLIC_BANK: "public knowledg
 # read (Buzz's information-flow rule: a memory m is read in conversation D only when A(D) ⊆ R(m)). What
 # the owner's own conversations keep (the window, a terminal, a scheduled task) is the installation's,
 # and the owner's recall reads every audience. An inside conversation is its own audience, unless the
-# ``audience_resolver`` answers that everyone in the company can read it. ``observation_scopes`` of
-# ``[["audience:*"]]`` keep each observation within one audience, so a summary never widens one.
+# ``audience_resolver`` answers that everyone in the company can read it. A scheduled task's result can
+# be delivered anywhere, so it recalls only what everyone in the company may read.
+#
+# Summaries (observations) are the provider's to place: each audience's are its own, and what a
+# colleague tells an agent in a direct message, or the owner keeps, is also summarised for the whole
+# company, under the server's brief for the ``audience:company`` scope, which keeps the work and leaves
+# a person's private matters out. A private channel's summaries stay its own: the company chose who
+# reads it. An outside person's bank is theirs alone, so their memories share one set of summaries.
 AUDIENCE = "audience:"
 EVERYONE_INSIDE = AUDIENCE + "company"
 OWNERS_OWN = AUDIENCE + "installation"
@@ -2026,11 +2032,25 @@ class HindsightMemoryProvider(MemoryProvider):
             self._shared_with = now
 
     def _recall_audiences(self, bank: str, audience: str) -> list[str] | None:
-        """The audiences a recall in *bank* may return: every one for the owner and outside the
-        company's bank, else what everyone in the company may read and this conversation's own."""
-        if bank != TEAM_BANK or not getattr(self, "_audience", False) or audience in ("", OWNERS_OWN):
+        """The audiences a recall in *bank* may return: what everyone in the company may read for a
+        scheduled task, every one for the owner and outside the company's bank, else what everyone
+        in the company may read and this conversation's own."""
+        if bank != TEAM_BANK or not getattr(self, "_audience", False):
+            return None
+        if getattr(self, "_agent_context", "primary") == "cron":
+            return [EVERYONE_INSIDE]
+        if audience in ("", OWNERS_OWN):
             return None
         return list(dict.fromkeys((EVERYONE_INSIDE, audience)))
+
+    def _observation_scopes_of(self, audience: str) -> Any:
+        """Where the summaries of what is said with *audience* go: its own audience's, and the company's
+        too when a colleague says it to an agent alone or the owner keeps it; one set for an outside
+        person's bank."""
+        if not audience:
+            return "shared"
+        teaches = audience == OWNERS_OWN or (audience != EVERYONE_INSIDE and self._chat_type == "dm")
+        return [[audience], [EVERYONE_INSIDE]] if teaches else [[audience]]
 
     def _bank_label(self, bank: str) -> str:
         return _BANK_LABELS.get(bank) or ("this person's own memory" if bank == self._bank_id else f"the memory {bank}")
@@ -2377,12 +2397,19 @@ class HindsightMemoryProvider(MemoryProvider):
         if not getattr(self, "_audience", False) or getattr(self, "_shared_with", "") in ("", OWNERS_OWN):
             return ""
         name = _spoken_name(self._chat_name)
-        where = "this direct message" if self._chat_type == "dm" else f"#{name}" if name else "this conversation"
+        direct = self._chat_type == "dm"
+        where = "this direct message" if direct else f"#{name}" if name else "this conversation"
         return (
             f"\n\n# Who can read this conversation\nEveryone in {where} can read this conversation, and you use only "
             f"what all of them can read. When asked about something nothing here tells you, answer that you can only "
             f"use what everyone in {where} can read and that nothing here says anything about it. Never suggest that "
             "it was said somewhere else."
+            + (
+                " What you learn here about the work also reaches the company's other agents; a person's private "
+                "matters, and what they ask you to keep between you, stay here."
+                if direct
+                else ""
+            )
         )
 
     # -- recall ------------------------------------------------------------------
@@ -2700,12 +2727,13 @@ class HindsightMemoryProvider(MemoryProvider):
         tags: List[str] | None = None,
         occurred_at: str | None = None,
         update_mode: str | None = None,
-        provenance: List[str] | None = None,
+        audience: str | None = None,
     ) -> Dict[str, Any]:
         """Build one aretain_batch item. The server resolves occurred_start/end (incl.
         relative phrases in content) from the item timestamp: explicit occurred_at
-        wins, else the configured event clock. *provenance* is the provider's own by:, agent:
-        and audience: tags; every other tag, configured or passed, loses any that names one."""
+        wins, else the configured event clock. *audience* is where it was said, with
+        inside_platforms set: the provider's own by:, agent: and audience: tags and observation
+        scopes follow from it, and every other tag, configured or passed, loses any that names one."""
         item: Dict[str, Any] = {
             # See #93568.
             "content": content,
@@ -2713,13 +2741,17 @@ class HindsightMemoryProvider(MemoryProvider):
             "timestamp": (occurred_at or "").strip() or _event_timestamp(),
         }
         merged_tags = _normalize_string_list(list(self._retain_tags) + _normalize_string_list(tags))
+        observation_scopes = self._observation_scopes
         if getattr(self, "_audience", False):
             # Who said it, to which agent and who may read it are the provider's to write: every other tag is
             # checked as the server receives it, filled and trimmed, and the provider's own are added after.
             merged_tags = [tag for tag in merged_tags if not tag.startswith(_PROVENANCE)]
-        merged_tags = _normalize_string_list(merged_tags + list(provenance or []))
+            if audience is not None:
+                merged_tags += self._audience_tags(audience)
+                observation_scopes = self._observation_scopes_of(audience)
+        merged_tags = _normalize_string_list(merged_tags)
         item.update({k: v for k, v in (("context", context), ("update_mode", update_mode)) if v is not None})
-        item.update({k: v for k, v in (("tags", merged_tags), ("observation_scopes", self._observation_scopes)) if v})
+        item.update({k: v for k, v in (("tags", merged_tags), ("observation_scopes", observation_scopes)) if v})
         # Per-item strategy: overrides the bank default for this item only. Omitted when
         # unset so the bank keeps deciding.
         if self._retain_strategy:
@@ -2786,7 +2818,7 @@ class HindsightMemoryProvider(MemoryProvider):
                 tags=tags,
                 occurred_at=_event_timestamp(),
                 update_mode=update_mode,
-                provenance=self._audience_tags(audience),
+                audience=audience,
             ),
             bank_ids=bank_ids,
             retain_async=self._retain_async,
@@ -2964,7 +2996,7 @@ class HindsightMemoryProvider(MemoryProvider):
                 if part
             ),
             tags=["builtin-memory", f"builtin-target:{target}", f"builtin-action:{action}"],
-            provenance=self._audience_tags(audience),
+            audience=audience,
         )
         bank_ids = list(self._write_bank_ids)
         self._enqueue_retain(
@@ -3060,7 +3092,7 @@ class HindsightMemoryProvider(MemoryProvider):
             context=" ".join(part for part in (self._audience_context(), context) if part),
             tags=args.get("tags"),
             occurred_at=args.get("occurred_at"),
-            provenance=self._audience_tags(self._shared_with),
+            audience=self._shared_with,
         )
         self._name_outside_bank()
         resp = self._retain_batch(item, bank_id=bank, retain_async=self._retain_async)
