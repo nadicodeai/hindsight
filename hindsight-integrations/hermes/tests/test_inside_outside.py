@@ -404,14 +404,19 @@ def test_an_inside_conversation_keeps_and_recalls_within_its_audience(
     assert open_channels == [("buzz", chat)]
 
 
-def test_the_owner_keeps_what_they_say_on_their_computer_and_recalls_every_audience(provider, open_channels):
+def test_the_owner_keeps_what_they_say_on_their_computer_and_recalls_the_company_s_and_their_own(
+    provider, open_channels
+):
     instance, fake = provider(AUDIENCES, platform="desktop")
     instance.sync_turn("Quotes go out on the new letterhead", "Noted.")
     instance.handle_tool_call("long_term_memory_search", {"query": "letterhead"})
     instance.shutdown()
     assert _tags(fake) == [{"audience:installation"}]
     assert _scopes(fake) == [[["audience:installation"], ["audience:company"]]]
-    assert _filters(fake) == [("company", None, None), ("public", None, None)]
+    assert _filters(fake) == [
+        ("company", ("audience:company", "audience:installation"), "any_strict"),
+        ("public", None, None),
+    ]
     assert open_channels == []
 
 
@@ -551,10 +556,20 @@ def test_the_agent_is_told_she_uses_only_what_everyone_in_the_conversation_can_r
     assert ("also reaches the company's other agents" in block) is reaches_the_company
 
 
-def test_the_owner_is_told_nothing_about_audiences(provider, open_channels):
-    instance, _ = provider(AUDIENCES, platform="desktop")
+def test_the_owner_is_told_she_uses_what_the_company_and_this_computer_can_read(provider, open_channels):
+    instance, _ = provider({**AUDIENCES, "company_name": "Ferri Srl"}, platform="desktop")
     block = instance.system_prompt_block()
     instance.shutdown()
+    assert "You use what everyone at Ferri Srl can read and what was said to you on this computer." in block
+    assert "Settings › Memory lists every memory" in block
+    assert "Who can read this conversation" not in block
+
+
+def test_a_scheduled_task_is_told_nothing_about_audiences(provider, open_channels):
+    instance, _ = provider(AUDIENCES, agent_context="cron", platform="cron")
+    block = instance.system_prompt_block()
+    instance.shutdown()
+    assert "What you can use from memory" not in block
     assert "Who can read this conversation" not in block
 
 

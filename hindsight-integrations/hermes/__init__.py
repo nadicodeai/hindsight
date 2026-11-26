@@ -672,10 +672,12 @@ _BANK_LABELS = {TEAM_BANK: "the team's knowledge", PUBLIC_BANK: "public knowledg
 # Audiences: every memory in the company's bank carries one ``audience:`` tag, the people who could read
 # the conversation it came from, and a conversation recalls only the memories all of its own people may
 # read (Buzz's information-flow rule: a memory m is read in conversation D only when A(D) ⊆ R(m)). What
-# the owner's own conversations keep (the window, a terminal, a scheduled task) is the installation's,
-# and the owner's recall reads every audience. An inside conversation is its own audience, unless the
-# ``audience_resolver`` answers that everyone in the company can read it. A scheduled task's result can
-# be delivered anywhere, so it recalls only what everyone in the company may read.
+# the owner's own conversations keep (the window, a terminal, a scheduled task) is the installation's.
+# An inside conversation is its own audience, unless the ``audience_resolver`` answers that everyone in
+# the company can read it. Every conversation, the owner's included, recalls what everyone in the company
+# may read and its own audience, nothing else: what it says can be summarised for the company, so it must
+# not carry another audience's memories there. A scheduled task's result can be delivered anywhere, so it
+# recalls only what everyone in the company may read.
 #
 # Summaries (observations) are the provider's to place: each audience's are its own, and what a
 # colleague tells an agent in a direct message, or the owner keeps, is also summarised for the whole
@@ -2032,15 +2034,12 @@ class HindsightMemoryProvider(MemoryProvider):
             self._shared_with = now
 
     def _recall_audiences(self, bank: str, audience: str) -> list[str] | None:
-        """The audiences a recall in *bank* may return: what everyone in the company may read for a
-        scheduled task, every one for the owner and outside the company's bank, else what everyone
-        in the company may read and this conversation's own."""
-        if bank != TEAM_BANK or not getattr(self, "_audience", False):
+        """The audiences a recall in *bank* may return: every one outside the company's bank, what
+        everyone in the company may read for a scheduled task, else that and this conversation's own."""
+        if bank != TEAM_BANK or not getattr(self, "_audience", False) or not audience:
             return None
         if getattr(self, "_agent_context", "primary") == "cron":
             return [EVERYONE_INSIDE]
-        if audience in ("", OWNERS_OWN):
-            return None
         return list(dict.fromkeys((EVERYONE_INSIDE, audience)))
 
     def _observation_scopes_of(self, audience: str) -> Any:
@@ -2394,8 +2393,17 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _audience_rule(self) -> str:
         """What the agent tells someone who asks about another audience, in this conversation's words."""
-        if not getattr(self, "_audience", False) or getattr(self, "_shared_with", "") in ("", OWNERS_OWN):
+        if not getattr(self, "_audience", False) or not getattr(self, "_shared_with", ""):
             return ""
+        if self._shared_with == OWNERS_OWN:
+            if getattr(self, "_agent_context", "primary") == "cron":
+                return ""
+            return (
+                f"\n\n# What you can use from memory\nYou use what everyone at {self._company} can read and what was "
+                "said to you on this computer. When asked about something nothing here tells you, answer that it may "
+                "have been said in a private channel or in a colleague's direct message, which you cannot use here, "
+                "and that Settings › Memory lists every memory."
+            )
         name = _spoken_name(self._chat_name)
         direct = self._chat_type == "dm"
         where = "this direct message" if direct else f"#{name}" if name else "this conversation"
