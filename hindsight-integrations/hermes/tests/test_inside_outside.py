@@ -539,3 +539,24 @@ def test_pages_and_session_context_never_reach_an_inside_conversation(provider, 
     assert ({"hindsight_search_pages", "hindsight_read_page", "hindsight_create_page"} <= names) is offered
     assert ("what every channel said" in prompt) is offered
     assert client.reads == (["profile"] if offered else [])
+
+
+def test_a_built_in_memory_note_keeps_the_audience_of_its_turn(provider, open_channels):
+    instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", user_name="Marco", chat_id="sales")
+    context = contextvars.copy_context()
+    context.run(instance.on_turn_start, 1, "remember this")
+    context.run(instance.on_memory_write, "add", "memory", "Quotes go out on Fridays")
+    instance.shutdown()
+
+    (retain,) = fake.retains
+    tags = retain["items"][0]["tags"]
+    assert "audience:buzz:sales" in tags and "by:Marco" in tags
+
+
+def test_a_required_checkpoint_is_refused_while_audiences_are_kept_apart(provider):
+    instance, fake = provider(INSIDE, platform="buzz", user_id="ab12")
+    with pytest.raises(RuntimeError):
+        instance.on_pre_compress([{"role": "user", "content": "x"}], require_checkpoint=True)
+    assert instance.on_pre_compress([{"role": "user", "content": "x"}]) == ""
+    instance.shutdown()
+    assert fake.retains == []

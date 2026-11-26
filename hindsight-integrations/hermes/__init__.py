@@ -87,11 +87,10 @@ from .settings import (
     _project_name,
     _repository_root,
     _resolve_bank_id_template,
+    _sanitize_bank_segment,
     _strip_query_lines,
     _template_fields,
     resolve_chat_config,
-    _sanitize_bank_segment,
-    _template_fields,
 )
 
 logger = logging.getLogger(__name__)
@@ -2926,10 +2925,23 @@ class HindsightMemoryProvider(MemoryProvider):
             or not self._mirror_builtin_memory
         ):
             return
+        audience = self._turn_audience.get(self._shared_with)
         item = self._build_retain_kwargs(
             content,
-            context=f"Hermes built-in {target} memory entry",
-            tags=["builtin-memory", f"builtin-target:{target}", f"builtin-action:{action}"],
+            context=" ".join(
+                part
+                for part in (
+                    self._audience_context() if getattr(self, "_audience", False) else "",
+                    f"Hermes built-in {target} memory entry",
+                )
+                if part
+            ),
+            tags=[
+                "builtin-memory",
+                f"builtin-target:{target}",
+                f"builtin-action:{action}",
+                *self._audience_tags(audience),
+            ],
         )
         bank_ids = list(self._write_bank_ids)
         self._enqueue_retain(
@@ -2972,7 +2984,10 @@ class HindsightMemoryProvider(MemoryProvider):
         retain = RETAIN_SCHEMA
         if getattr(self, "_audience", False):
             recall = _with_property(RECALL_SCHEMA, "client", _CLIENT_PROPERTY)
-            retain = {**_with_property(RETAIN_SCHEMA, "for", _FOR_PROPERTY), "description": _AUDIENCE_RETAIN_DESCRIPTION}
+            retain = {
+                **_with_property(RETAIN_SCHEMA, "for", _FOR_PROPERTY),
+                "description": _AUDIENCE_RETAIN_DESCRIPTION,
+            }
         schemas = [recall, REFLECT_SCHEMA] if self._writes_disabled else [retain, recall, REFLECT_SCHEMA]
         if self._page_tools:
             schemas += [SEARCH_PAGES_SCHEMA, READ_PAGE_SCHEMA, LIST_PAGES_SCHEMA]
@@ -3063,7 +3078,10 @@ class HindsightMemoryProvider(MemoryProvider):
     def _tool_reflect(self, args: dict) -> str:
         query = args["query"]
         logger.debug(
-            "Tool long_term_memory_reflect: bank=%s, query_len=%d, budget=%s", self._bank_id, len(query), self._reflect_budget
+            "Tool long_term_memory_reflect: bank=%s, query_len=%d, budget=%s",
+            self._bank_id,
+            len(query),
+            self._reflect_budget,
         )
         text = self._reflect(query) or ""
         logger.debug("Tool long_term_memory_reflect: response_len=%d", len(text))
@@ -3249,6 +3267,10 @@ class HindsightMemoryProvider(MemoryProvider):
             return ""
         if self._writes_disabled:
             raise RuntimeError("Hindsight cannot write from this run, so it cannot checkpoint")
+        if getattr(self, "_audience", False):
+            # The messages can span audiences (a channel made private mid-session), and one document
+            # takes one audience's tag; each turn is already saved under its own by sync_turn.
+            raise RuntimeError("With inside_platforms set, a checkpoint would save several audiences under one tag")
         # default=str: an odd value in a message (a multimodal part object) must not raise here, or
         # Hermes would refuse every compression of this conversation for a reason no retry can fix.
         content = json.dumps(messages, ensure_ascii=False, default=str)
