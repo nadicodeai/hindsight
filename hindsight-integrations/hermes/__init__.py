@@ -642,19 +642,6 @@ def _pages_method(client: Any, name: str, legacy: str) -> Callable[..., Any]:
     return getattr(client, name, None) or getattr(client, legacy)
 
 
-def _api_error_detail(exc: Exception) -> str:
-    """The server's ``detail`` message for a failed API call; the client exception's own text
-    carries the HTTP response headers, which is noise in a tool result."""
-    with contextlib.suppress(Exception):
-        detail = json.loads(getattr(exc, "body", None) or "").get("detail")
-        if isinstance(detail, list):  # a 422 lists one entry per invalid field
-            detail = "; ".join(str(d.get("msg", d)) if isinstance(d, dict) else str(d) for d in detail)
-        if isinstance(detail, str) and detail:
-            return detail
-    status = getattr(exc, "status", None)
-    return f"HTTP {status}" if status else (str(exc) or type(exc).__name__)
-
-
 def _bank_not_written_yet(exc: Exception) -> bool:
     """Hindsight answers 404 for a bank nothing has been retained to yet. Read off the status rather
     than importing the client's exception class here: that import, run from the prefetch thread while
