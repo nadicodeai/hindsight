@@ -2700,22 +2700,24 @@ class HindsightMemoryProvider(MemoryProvider):
         tags: List[str] | None = None,
         occurred_at: str | None = None,
         update_mode: str | None = None,
+        provenance: List[str] | None = None,
     ) -> Dict[str, Any]:
         """Build one aretain_batch item. The server resolves occurred_start/end (incl.
         relative phrases in content) from the item timestamp: explicit occurred_at
-        wins, else the configured event clock."""
+        wins, else the configured event clock. *provenance* is the provider's own by:, agent:
+        and audience: tags; every other tag, configured or passed, loses any that names one."""
         item: Dict[str, Any] = {
             # See #93568.
             "content": content,
             "metadata": metadata or self._build_metadata(message_count=1, turn_index=self._turn_index),
             "timestamp": (occurred_at or "").strip() or _event_timestamp(),
         }
-        configured = _normalize_string_list(list(self._retain_tags))
+        merged_tags = _normalize_string_list(list(self._retain_tags) + _normalize_string_list(tags))
         if getattr(self, "_audience", False):
-            # Who said it, to which agent and who may read it are the provider's to write: a configured tag
-            # is checked as the server receives it, after its placeholders are filled and it is trimmed.
-            configured = [tag for tag in configured if not tag.startswith(_PROVENANCE)]
-        merged_tags = _normalize_string_list(configured + _normalize_string_list(tags))
+            # Who said it, to which agent and who may read it are the provider's to write: every other tag is
+            # checked as the server receives it, filled and trimmed, and the provider's own are added after.
+            merged_tags = [tag for tag in merged_tags if not tag.startswith(_PROVENANCE)]
+        merged_tags = _normalize_string_list(merged_tags + list(provenance or []))
         item.update({k: v for k, v in (("context", context), ("update_mode", update_mode)) if v is not None})
         item.update({k: v for k, v in (("tags", merged_tags), ("observation_scopes", self._observation_scopes)) if v})
         # Per-item strategy: overrides the bank default for this item only. Omitted when
@@ -2773,7 +2775,7 @@ class HindsightMemoryProvider(MemoryProvider):
         # would flip the document's tag set and re-consolidate it from scratch.
         parent = self._parent_session_id if self._parent_session_id != self._session_id else ""
         lineage = (("session", self._session_id), ("parent", parent))
-        tags = [*(f"{kind}:{sid}" for kind, sid in lineage if sid), *self._audience_tags(audience)] or None
+        tags = [f"{kind}:{sid}" for kind, sid in lineage if sid] or None
         bank_ids = list(self._write_bank_ids)
         retain_context = self._audience_context() if getattr(self, "_audience", False) else self._retain_context
         return _PendingRetain(
@@ -2784,6 +2786,7 @@ class HindsightMemoryProvider(MemoryProvider):
                 tags=tags,
                 occurred_at=_event_timestamp(),
                 update_mode=update_mode,
+                provenance=self._audience_tags(audience),
             ),
             bank_ids=bank_ids,
             retain_async=self._retain_async,
@@ -2960,12 +2963,8 @@ class HindsightMemoryProvider(MemoryProvider):
                 )
                 if part
             ),
-            tags=[
-                "builtin-memory",
-                f"builtin-target:{target}",
-                f"builtin-action:{action}",
-                *self._audience_tags(audience),
-            ],
+            tags=["builtin-memory", f"builtin-target:{target}", f"builtin-action:{action}"],
+            provenance=self._audience_tags(audience),
         )
         bank_ids = list(self._write_bank_ids)
         self._enqueue_retain(
@@ -3059,11 +3058,9 @@ class HindsightMemoryProvider(MemoryProvider):
         item = self._build_retain_kwargs(
             content,
             context=" ".join(part for part in (self._audience_context(), context) if part),
-            tags=[
-                *(tag for tag in args.get("tags") or [] if not tag.startswith(_PROVENANCE)),
-                *self._audience_tags(self._shared_with),
-            ],
+            tags=args.get("tags"),
             occurred_at=args.get("occurred_at"),
+            provenance=self._audience_tags(self._shared_with),
         )
         self._name_outside_bank()
         resp = self._retain_batch(item, bank_id=bank, retain_async=self._retain_async)

@@ -686,3 +686,15 @@ def test_a_page_tool_never_offered_is_refused_when_called(provider):
     instance.shutdown()
 
     assert "Unknown tool" in answer
+
+
+def test_a_tag_the_model_passes_cannot_say_who_may_read_a_memory_once_trimmed(provider, open_channels):
+    instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", user_name="Marco", chat_id="sales")
+    instance.handle_tool_call(
+        "long_term_memory_save", {"content": "Rossi pays late", "tags": [" audience:company", " by:Owner", "client"]}
+    )
+    instance.shutdown()
+
+    tags = fake.retains[0]["items"][0]["tags"]
+    assert "audience:company" not in tags and "by:Owner" not in tags
+    assert {"client", "audience:buzz:sales", "by:Marco"} <= set(tags)
