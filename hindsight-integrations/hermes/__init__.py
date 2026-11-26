@@ -2649,6 +2649,12 @@ class HindsightMemoryProvider(MemoryProvider):
         named = getattr(self, "_audience", False)
         user_prefix = self._speaker if named else self._retain_user_prefix
         assistant_prefix = self._agent_name if named else self._retain_assistant_prefix
+        if bot_label is not None and bot_label.casefold() in {
+            str(name).casefold()
+            for name in (user_prefix, assistant_prefix, self._retain_user_prefix, self._retain_assistant_prefix)
+        }:
+            # Never the label of the person or the agent of this conversation: the turn would read as theirs.
+            bot_label = "Another agent"
         user_role, user_label = ("user", user_prefix) if bot_label is None else (bot_label, bot_label)
         messages = [{"role": user_role, "content": f"{user_label}: {user_content}", "timestamp": now}]
         if tool_calls:

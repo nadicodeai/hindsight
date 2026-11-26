@@ -698,3 +698,13 @@ def test_a_tag_the_model_passes_cannot_say_who_may_read_a_memory_once_trimmed(pr
     tags = fake.retains[0]["items"][0]["tags"]
     assert "audience:company" not in tags and "by:Owner" not in tags
     assert {"client", "audience:buzz:sales", "by:Marco"} <= set(tags)
+
+
+@pytest.mark.parametrize("name", ["Marco", "nadia", "User"])
+def test_another_agent_named_like_this_conversation_s_person_or_agent_is_saved_as_another_agent(provider, name):
+    instance, fake = provider({**INSIDE, "agent_name": "Nadia"}, platform="buzz", user_id="ab12", user_name="Marco")
+    instance.sync_turn("hello", "hi", turn_author={"id": "b1", "name": name, "is_bot": True})
+    instance.shutdown()
+
+    first = json.loads(fake.retains[0]["items"][0]["content"])[0]
+    assert (first["role"], first["content"]) == ("Another agent", "Another agent: hello")
