@@ -182,13 +182,13 @@ _RESERVED_ROLES = frozenset({"user", "assistant", "system", "tool", "developer"}
 
 def _bot_label(turn_author: Dict[str, Any] | None) -> str | None:
     """The label for a turn another agent wrote, from Hermes' ``turn_author`` ({"id", "name",
-    "is_bot"}); None when a human wrote it or Hermes sent nothing. "Bot" when it has no name."""
+    "is_bot"}); None when a human wrote it or Hermes sent nothing. "Another agent" when it has no usable name."""
     if not (isinstance(turn_author, dict) and turn_author.get("is_bot")):
         return None
     # The name becomes the message's role and label: one short line, as a person's name is, and never
     # a role the transcript gives the user, the agent or a tool.
     name = _spoken_name(turn_author.get("name"))
-    return "Bot" if not name or name.casefold() in _RESERVED_ROLES else name
+    return "Another agent" if not name or name.casefold() in _RESERVED_ROLES else name
 
 
 # How long a turn waits for the background recall before it goes ahead without memory.
