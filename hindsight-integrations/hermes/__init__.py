@@ -523,7 +523,7 @@ _FOR_PROPERTY = {
 _AUDIENCE_RETAIN_DESCRIPTION = (
     RETAIN_SCHEMA["description"] + " This conversation is saved to memory on its own after each reply, so do not "
     "save again what was just said: save only what the conversation does not hold, such as a fact read in a "
-    "document or found with a tool, or a fact for everyone."
+    "document or found with a tool, a fact for everyone, or the correction of a memory that is wrong."
 )
 
 _CLIENT_PROPERTY = {
