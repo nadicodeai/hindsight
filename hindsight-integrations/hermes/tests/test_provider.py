@@ -1430,6 +1430,8 @@ def test_session_context_skipped_while_the_embedded_daemon_is_down(provider, mon
     monkeypatch.setattr(plugin, "_daemon_is_running", lambda profile: False)
     assert "Session Context" not in instance.system_prompt_block()
     assert client.reads == []
+
+
 @pytest.mark.parametrize(
     ("status", "done"),
     [("pending", False), ("completed", True), ("failed", True), ("cancelled", True), ("not_found", True)],
