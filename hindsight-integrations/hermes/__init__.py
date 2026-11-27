@@ -678,6 +678,7 @@ EVERYONE_INSIDE = AUDIENCE + "company"
 OWNERS_OWN = AUDIENCE + "installation"
 RECALLED_COMPANY_AND_OWN = "recalled:company-and-own"
 RECALLED_EVERY_AUDIENCE = "recalled:every-audience"
+RECALLED_NOT_KNOWN = "recalled:not-known"
 
 
 _RECALL_TYPES = ("world", "experience", "observation")
@@ -2060,10 +2061,10 @@ class HindsightMemoryProvider(MemoryProvider):
                 )
             except Exception as exc:
                 logger.warning(
-                    "Memory: whether this chat began before the update could not be read, so it keeps to itself: %r",
+                    "Memory: whether this chat began before the update could not be read, so this turn keeps to itself: %r",
                     exc,
                 )
-                self._from_before = True
+                return RECALLED_NOT_KNOWN
         return RECALLED_EVERY_AUDIENCE if self._from_before else RECALLED_COMPANY_AND_OWN
 
     def _kept_before(self, session: str) -> bool:
@@ -3125,7 +3126,10 @@ class HindsightMemoryProvider(MemoryProvider):
             return "Memory queued for storage." if self._retain_async else "Memory stored successfully."
         wanted = args.get("for") or "me"
         bank = _SAVE_TARGETS.get(wanted) if self._inside else None
-        kept_here = bank == PUBLIC_BANK and self._shared_with not in (EVERYONE_INSIDE, OWNERS_OWN)
+        kept_here = bank == PUBLIC_BANK and (
+            self._shared_with not in (EVERYONE_INSIDE, OWNERS_OWN)
+            or (self._shared_with == OWNERS_OWN and self._owner_s_mark() != RECALLED_COMPANY_AND_OWN)
+        )
         bank = None if kept_here else bank
         bank = bank or self._bank_id
         item = self._build_retain_kwargs(

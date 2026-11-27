@@ -497,7 +497,9 @@ def test_a_window_chat_resumed_without_a_reset_is_asked_again_whether_it_began_b
     assert _scopes(fake)[-1] == [["audience:installation", "recalled:every-audience"]]
 
 
-def test_a_window_chat_whose_start_cannot_be_read_keeps_to_this_computer(provider, open_channels):
+def test_a_window_chat_whose_start_cannot_be_read_keeps_that_turn_to_this_computer_and_asks_again(
+    provider, open_channels
+):
     instance, fake = provider(AUDIENCES, platform="desktop")
 
     async def unreadable(bank_id, document_id):
@@ -505,8 +507,26 @@ def test_a_window_chat_whose_start_cannot_be_read_keeps_to_this_computer(provide
 
     fake.documents.get_document = unreadable
     instance.sync_turn("Anna Ferri's client code is FER-2291", "Noted.")
+    del fake.documents.get_document
+    fake.documents.get_document = fake._get_document
+    instance.sync_turn("Quotes go out on the new letterhead", "Noted.")
     instance.shutdown()
-    assert _scopes(fake) == [[["audience:installation", "recalled:every-audience"]]]
+    assert _scopes(fake) == [
+        [["audience:installation", "recalled:not-known"]],
+        [["audience:installation", "recalled:company-and-own"], ["audience:company"]],
+    ]
+
+
+def test_a_window_chat_that_began_before_the_update_saves_nothing_for_everyone(provider, open_channels):
+    instance, fake = provider(AUDIENCES, platform="desktop")
+    fake.kept_documents["window-1"] = ["audience:installation"]
+    instance._session_id = "window-1"
+    result = json.loads(
+        instance.handle_tool_call("long_term_memory_save", {"content": "Rossi's quote is 12k", "for": "everyone"})
+    )
+    instance.shutdown()
+    assert [call["bank_id"] for call in fake.retains] == ["company"]
+    assert result["result"].startswith("Saved only for the people in this conversation")
 
 
 def test_an_outside_person_s_memories_share_one_set_of_summaries_whatever_is_configured(provider):
