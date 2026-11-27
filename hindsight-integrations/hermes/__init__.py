@@ -676,7 +676,7 @@ _BANK_LABELS = {TEAM_BANK: "the team's knowledge", PUBLIC_BANK: "public knowledg
 AUDIENCE = "audience:"
 EVERYONE_INSIDE = AUDIENCE + "company"
 OWNERS_OWN = AUDIENCE + "installation"
-RECALLED_EVERY_AUDIENCE = "recalled:every-audience"
+RECALLED_COMPANY_AND_OWN = "recalled:company-and-own"
 
 
 _RECALL_TYPES = ("world", "experience", "observation")
@@ -720,7 +720,7 @@ _MANAGEABLE_SETTINGS = {
     "api_url": "HINDSIGHT_API_URL",
 }
 _IDENTITY_SETTINGS = ("company_name", "owner_name", "agent_name")
-_PROVENANCE = ("by:", "agent:", AUDIENCE)
+_PROVENANCE = ("by:", "agent:", AUDIENCE, "recalled:")
 
 
 def _managed_keys() -> frozenset[str]:
@@ -923,7 +923,6 @@ class HindsightMemoryProvider(MemoryProvider):
         # The audience of the latest turn to start; each turn's own is bound in its context, which
         # Hermes carries into the background worker that saves the turn.
         self._shared_with = self._buffered_audience = ""
-        self._used_what_the_company_may_not_read = self._buffered_unshared = False
         self._turn_audience: contextvars.ContextVar[str] = contextvars.ContextVar(f"hindsight_turn_audience_{id(self)}")
         self._session_id = self._parent_session_id = self._document_id = ""
         self._status_callback: Optional[Callable[[str], None]] = None
@@ -1769,7 +1768,6 @@ class HindsightMemoryProvider(MemoryProvider):
 
         for name in _SESSION_KWARGS:
             setattr(self, f"_{name}", str(kwargs.get(name) or "").strip())
-        self._used_what_the_company_may_not_read = self._buffered_unshared = False
         self._platform = self._platform or "cli"  # after the loop, which would blank it again
         # The one config every setting below reads: the file with this chat's ``chats`` entry over it.
         self._chat_route = resolve_chat_config(
@@ -2026,12 +2024,16 @@ class HindsightMemoryProvider(MemoryProvider):
             logger.info("Memory: %s is now shared with %s", self._shared_with, now)
             self._shared_with = now
 
-    def _recall_audiences(self, bank: str, audience: str) -> list[str] | None:
+    def _recall_audiences(self, bank: str, audience: str) -> list[dict] | None:
         if bank != TEAM_BANK or not getattr(self, "_audience", False) or not audience:
             return None
+        everyone = {"tags": [EVERYONE_INSIDE], "match": "any_strict"}
         if self._result_can_go_anywhere():
-            return [EVERYONE_INSIDE]
-        return list(dict.fromkeys((EVERYONE_INSIDE, audience)))
+            return [everyone]
+        if audience == OWNERS_OWN:
+            own = {"tags": [OWNERS_OWN, RECALLED_COMPANY_AND_OWN], "match": "all_strict"}
+            return [{"or": [everyone, own]}]
+        return [{"tags": list(dict.fromkeys((EVERYONE_INSIDE, audience))), "match": "any_strict"}]
 
     def _result_can_go_anywhere(self) -> bool:
         return getattr(self, "_agent_context", "primary") == "cron"
@@ -2039,20 +2041,13 @@ class HindsightMemoryProvider(MemoryProvider):
     def _observation_scopes_of(self, audience: str) -> Any:
         if not audience:
             return "shared"
-        return [[audience], [EVERYONE_INSIDE]] if self._teaches_the_company(audience) else [[audience]]
+        own = [audience, RECALLED_COMPANY_AND_OWN] if audience == OWNERS_OWN else [audience]
+        return [own, [EVERYONE_INSIDE]] if self._teaches_the_company(audience) else [own]
 
     def _teaches_the_company(self, audience: str) -> bool:
         kept_by_the_owner = audience == OWNERS_OWN
         said_to_an_agent_alone = audience not in ("", EVERYONE_INSIDE) and self._chat_type == "dm"
-        return (kept_by_the_owner or said_to_an_agent_alone) and not self._used_what_the_company_may_not_read
-
-    def _note_what_was_used(self, bank_id: str, results: list) -> None:
-        if not getattr(self, "_audience", False) or not results:
-            return
-        if bank_id not in (TEAM_BANK, PUBLIC_BANK) or any(
-            RECALLED_EVERY_AUDIENCE in (getattr(result, "tags", None) or ()) for result in results
-        ):
-            self._used_what_the_company_may_not_read = True
+        return kept_by_the_owner or said_to_an_agent_alone
 
     def _bank_label(self, bank: str) -> str:
         return _BANK_LABELS.get(bank) or ("this person's own memory" if bank == self._bank_id else f"the memory {bank}")
@@ -2485,14 +2480,15 @@ class HindsightMemoryProvider(MemoryProvider):
             kwargs["min_scores"] = self._recall_min_scores
 
         def _in(bank_id: str) -> dict:
-            audiences = self._recall_audiences(bank_id, audience)
-            if not audiences:
+            readable = self._recall_audiences(bank_id, audience)
+            if not readable:
                 return kwargs
             # The audience replaces the include filter; the server refuses tags beside tag_groups.
-            if "tag_groups" in kwargs:
-                excluded = [group for group in kwargs["tag_groups"] if "not" in group]
-                return {**kwargs, "tag_groups": [{"tags": audiences, "match": "any_strict"}, *excluded]}
-            return {**kwargs, "tags": audiences, "tags_match": "any_strict"}
+            excluded = [group for group in kwargs.get("tag_groups", []) if "not" in group]
+            return {
+                **{k: v for k, v in kwargs.items() if k not in ("tags", "tags_match")},
+                "tag_groups": [*readable, *excluded],
+            }
 
         async def _recall_all(client):
             extra_timeout = float(self._timeout or _DEFAULT_TIMEOUT) * _EXTRA_BANK_TIMEOUT_SHARE
@@ -2531,7 +2527,6 @@ class HindsightMemoryProvider(MemoryProvider):
             # Drop only what an earlier bank already returned; one bank's own answer passes
             # through untouched, so a single-bank recall is exactly the server's response.
             kept = [r for r in bank_results if getattr(r, "text", None) not in seen]
-            self._note_what_was_used(bank_id, kept)
             results.extend(kept)
             seen.update(text for r in kept if (text := getattr(r, "text", None)))
         if getattr(self, "_audience", False) and len(bank_ids) > 1:
@@ -2547,13 +2542,10 @@ class HindsightMemoryProvider(MemoryProvider):
             kwargs: Dict[str, Any] = {"bank_id": bank, "query": query, "budget": self._reflect_budget}
             if self._reflect_tags:
                 kwargs.update(tags=self._reflect_tags, tags_match=self._reflect_tags_match)
-            if audiences := self._recall_audiences(bank, audience):
+            if readable := self._recall_audiences(bank, audience):
                 kwargs.pop("tags", None)
                 kwargs.pop("tags_match", None)
-                kwargs["tag_groups"] = [
-                    {"tags": audiences, "match": "any_strict"},
-                    {"not": {"tags": [RECALLED_EVERY_AUDIENCE], "match": "any_strict"}},
-                ]
+                kwargs["tag_groups"] = readable
             if getattr(self, "_audience", False):
                 kwargs["exclude_mental_models"] = True
             try:
@@ -2723,6 +2715,7 @@ class HindsightMemoryProvider(MemoryProvider):
             f"by:{self._speaker}",
             *([f"agent:{self._agent_identity}"] if self._agent_identity else []),
             *([audience] if audience else []),
+            *([RECALLED_COMPANY_AND_OWN] if audience == OWNERS_OWN else []),
         ]
 
     def _build_metadata(self, *, message_count: int, turn_index: int) -> Dict[str, str]:
@@ -2926,14 +2919,13 @@ class HindsightMemoryProvider(MemoryProvider):
             self._session_id = str(session_id).strip()
 
         audience = self._turn_audience.get(self._shared_with)
-        unshared = self._used_what_the_company_may_not_read
-        if audience != self._buffered_audience or unshared != self._buffered_unshared:
+        if audience != self._buffered_audience:
             # Turns said under another audience leave first, under their own tag, in their own document.
             self._flush_buffered_turns("flush-on-audience")
             self._session_turns = []
             self._last_retained_turn_count = 0
             self._document_id = _mint_document_id(self._session_id)
-            self._buffered_audience, self._buffered_unshared = audience, unshared
+            self._buffered_audience = audience
         self._session_turns.append(
             json.dumps(
                 self._build_turn_messages(
@@ -3133,6 +3125,8 @@ class HindsightMemoryProvider(MemoryProvider):
         query, client = args["query"], str(args.get("client") or "").strip()
         banks = None
         if client and getattr(self, "_audience", False) and self._inside:
+            if self._result_can_go_anywhere():
+                return "A scheduled task cannot look in a contact's memory: its result can reach anyone."
             platform, sep, user = client.partition(":")
             banks = [_person_bank(f"{platform}-{user}")] if sep else self._outside_banks_named(client)
             logger.info("Memory: person=%s search client=%r -> %s", self._person, client, banks)
@@ -3314,7 +3308,6 @@ class HindsightMemoryProvider(MemoryProvider):
             self._write_bank_ids = self._build_write_bank_ids()
         self._session_turns = []
         self._turn_counter = self._turn_index = self._last_retained_turn_count = 0
-        self._used_what_the_company_may_not_read = self._buffered_unshared = False
         # The new session reads session_context afresh: the bank may have changed above, and a
         # mental model refreshed since the last session is picked up here, as the docs promise.
         self._session_context_block = None

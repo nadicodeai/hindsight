@@ -363,11 +363,23 @@ def _scopes(fake: FakeClient) -> list[object]:
     return [call["items"][0].get("observation_scopes") for call in fake.retains]
 
 
-def _filters(fake: FakeClient) -> list[tuple[str, tuple[str, ...] | None, str | None]]:
+def _filters(fake: FakeClient) -> list[tuple[str, object, str | None]]:
+    def readable(groups):
+        group = groups[0]
+        if "or" in group:
+            return tuple((tuple(each["tags"]), each["match"]) for each in group["or"]), "or"
+        return tuple(group["tags"]), group["match"]
+
     return [
-        (call["bank_id"], tuple(call["tags"]) if call.get("tags") else None, call.get("tags_match"))
+        (call["bank_id"], *(readable(call["tag_groups"]) if call.get("tag_groups") else (None, None)))
         for call in fake.recalls
     ]
+
+
+NADIA_S_OWN = (
+    (("audience:company",), "any_strict"),
+    (("audience:installation", "recalled:company-and-own"), "all_strict"),
+)
 
 
 @pytest.mark.parametrize(
@@ -412,11 +424,9 @@ def test_the_owner_keeps_what_they_say_on_their_computer_and_recalls_the_company
     instance.handle_tool_call("long_term_memory_search", {"query": "letterhead"})
     instance.shutdown()
     assert _tags(fake) == [{"audience:installation"}]
-    assert _scopes(fake) == [[["audience:installation"], ["audience:company"]]]
-    assert _filters(fake) == [
-        ("company", ("audience:company", "audience:installation"), "any_strict"),
-        ("public", None, None),
-    ]
+    assert _scopes(fake) == [[["audience:installation", "recalled:company-and-own"], ["audience:company"]]]
+    assert "recalled:company-and-own" in fake.retains[0]["items"][0]["tags"]
+    assert _filters(fake) == [("company", NADIA_S_OWN, "or"), ("public", None, None)]
     assert open_channels == []
 
 
@@ -427,67 +437,29 @@ def test_a_scheduled_task_recalls_only_what_everyone_in_the_company_may_read(pro
     instance.handle_tool_call("long_term_memory_reflect", {"query": "open quotes"})
     instance.shutdown()
     assert _tags(fake) == [{"audience:installation"}]
-    assert _scopes(fake) == [[["audience:installation"], ["audience:company"]]]
+    assert _scopes(fake) == [[["audience:installation", "recalled:company-and-own"], ["audience:company"]]]
     assert _filters(fake) == [("company", ("audience:company",), "any_strict"), ("public", None, None)]
     assert [(call["bank_id"], call.get("tag_groups")) for call in fake.reflects] == [
         (
             "company",
-            [
-                {"tags": ["audience:company"], "match": "any_strict"},
-                {"not": {"tags": ["recalled:every-audience"], "match": "any_strict"}},
-            ],
+            [{"tags": ["audience:company"], "match": "any_strict"}],
         ),
         ("public", None),
     ]
-
-
-class _TaggedClient(FakeClient):
-    """Answers each bank's recall with its own facts, each with its tags."""
-
-    def __init__(self, facts: dict[str, list[tuple[str, list[str]]]]):
-        super().__init__()
-        self._facts = facts
-
-    async def arecall(self, **kwargs):
-        self.recalls.append(kwargs)
-        results = [
-            types.SimpleNamespace(text=text, tags=tags, scores=types.SimpleNamespace(final=0.5))
-            for text, tags in self._facts.get(kwargs["bank_id"], [])
-        ]
-        return types.SimpleNamespace(results=results)
 
 
 def _documents(fake: FakeClient) -> list[str]:
     return [call["document_id"] for call in fake.retains]
 
 
-def test_a_direct_message_that_reads_a_contact_s_memory_stops_teaching_the_company(provider, open_channels):
-    client = _TaggedClient({"person-whatsapp-393331234567": [("Rossi pays in 90 days", [])]})
-    instance, fake = provider(
-        AUDIENCES, client=client, platform="buzz", user_id="ab12", chat_id="dm-luca", chat_type="dm"
+def test_a_scheduled_task_cannot_look_in_a_contact_s_memory(provider, open_channels):
+    instance, fake = provider({**AUDIENCES, "retain_cron": True}, agent_context="cron", platform="cron")
+    found = json.loads(
+        instance.handle_tool_call("long_term_memory_search", {"query": "terms", "client": "whatsapp:393331234567"})
     )
-    instance.sync_turn("The quotes skill reads Commerciale/Listini 2026", "Noted.")
-    instance.handle_tool_call("long_term_memory_search", {"query": "terms", "client": "whatsapp:393331234567"})
-    instance.sync_turn("What did Rossi say about payment?", "Rossi pays in 90 days.")
     instance.shutdown()
-    assert _scopes(fake) == [[["audience:buzz:dm-luca"], ["audience:company"]], [["audience:buzz:dm-luca"]]]
-    teaching, kept = _documents(fake)
-    assert teaching.endswith(":audience:buzz:dm-luca:audience:company")
-    assert kept.endswith(":audience:buzz:dm-luca")
-
-
-def test_the_window_stops_teaching_the_company_once_it_uses_a_memory_kept_while_it_recalled_every_audience(
-    provider, open_channels
-):
-    client = _TaggedClient(
-        {"company": [("Rossi's quote is 12k", ["audience:installation", "recalled:every-audience"])]}
-    )
-    instance, fake = provider(AUDIENCES, client=client, platform="desktop")
-    instance.sync_turn("Anna Ferri's client code is FER-2291", "Noted.")
-    instance.handle_tool_call("long_term_memory_search", {"query": "Rossi"})
-    instance.sync_turn("What is open with Rossi?", "The 12k quote.")
-    instance.shutdown()
-    assert _scopes(fake) == [[["audience:installation"], ["audience:company"]], [["audience:installation"]]]
+    assert "cannot look in a contact's memory" in found["result"]
+    assert _searched(fake) == []
 
 
 def test_the_owner_s_turns_go_to_a_document_of_their_own_audience_not_one_kept_before(provider, open_channels):
