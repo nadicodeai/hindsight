@@ -429,10 +429,72 @@ def test_a_scheduled_task_recalls_only_what_everyone_in_the_company_may_read(pro
     assert _tags(fake) == [{"audience:installation"}]
     assert _scopes(fake) == [[["audience:installation"], ["audience:company"]]]
     assert _filters(fake) == [("company", ("audience:company",), "any_strict"), ("public", None, None)]
-    assert [(call["bank_id"], call.get("tags")) for call in fake.reflects] == [
-        ("company", ["audience:company"]),
+    assert [(call["bank_id"], call.get("tag_groups")) for call in fake.reflects] == [
+        (
+            "company",
+            [
+                {"tags": ["audience:company"], "match": "any_strict"},
+                {"not": {"tags": ["recalled:every-audience"], "match": "any_strict"}},
+            ],
+        ),
         ("public", None),
     ]
+
+
+class _TaggedClient(FakeClient):
+    """Answers each bank's recall with its own facts, each with its tags."""
+
+    def __init__(self, facts: dict[str, list[tuple[str, list[str]]]]):
+        super().__init__()
+        self._facts = facts
+
+    async def arecall(self, **kwargs):
+        self.recalls.append(kwargs)
+        results = [
+            types.SimpleNamespace(text=text, tags=tags, scores=types.SimpleNamespace(final=0.5))
+            for text, tags in self._facts.get(kwargs["bank_id"], [])
+        ]
+        return types.SimpleNamespace(results=results)
+
+
+def _documents(fake: FakeClient) -> list[str]:
+    return [call["document_id"] for call in fake.retains]
+
+
+def test_a_direct_message_that_reads_a_contact_s_memory_stops_teaching_the_company(provider, open_channels):
+    client = _TaggedClient({"person-whatsapp-393331234567": [("Rossi pays in 90 days", [])]})
+    instance, fake = provider(
+        AUDIENCES, client=client, platform="buzz", user_id="ab12", chat_id="dm-luca", chat_type="dm"
+    )
+    instance.sync_turn("The quotes skill reads Commerciale/Listini 2026", "Noted.")
+    instance.handle_tool_call("long_term_memory_search", {"query": "terms", "client": "whatsapp:393331234567"})
+    instance.sync_turn("What did Rossi say about payment?", "Rossi pays in 90 days.")
+    instance.shutdown()
+    assert _scopes(fake) == [[["audience:buzz:dm-luca"], ["audience:company"]], [["audience:buzz:dm-luca"]]]
+    teaching, kept = _documents(fake)
+    assert teaching.endswith(":audience:buzz:dm-luca:audience:company")
+    assert kept.endswith(":audience:buzz:dm-luca")
+
+
+def test_the_window_stops_teaching_the_company_once_it_uses_a_memory_kept_while_it_recalled_every_audience(
+    provider, open_channels
+):
+    client = _TaggedClient(
+        {"company": [("Rossi's quote is 12k", ["audience:installation", "recalled:every-audience"])]}
+    )
+    instance, fake = provider(AUDIENCES, client=client, platform="desktop")
+    instance.sync_turn("Anna Ferri's client code is FER-2291", "Noted.")
+    instance.handle_tool_call("long_term_memory_search", {"query": "Rossi"})
+    instance.sync_turn("What is open with Rossi?", "The 12k quote.")
+    instance.shutdown()
+    assert _scopes(fake) == [[["audience:installation"], ["audience:company"]], [["audience:installation"]]]
+
+
+def test_the_owner_s_turns_go_to_a_document_of_their_own_audience_not_one_kept_before(provider, open_channels):
+    instance, fake = provider(AUDIENCES, platform="desktop")
+    instance.sync_turn("Quotes go out on the new letterhead", "Noted.")
+    instance.shutdown()
+    assert _documents(fake)[0].endswith(":audience:installation:audience:company")
 
 
 def test_an_outside_person_s_memories_share_one_set_of_summaries_whatever_is_configured(provider):
@@ -554,6 +616,13 @@ def test_the_agent_is_told_she_uses_only_what_everyone_in_the_conversation_can_r
     instance.shutdown()
     assert f"you can only use what everyone in {where} can read" in block
     assert ("also reaches the company's other agents" in block) is reaches_the_company
+
+
+def test_reflect_reads_no_page_written_from_the_whole_bank(provider, open_channels):
+    instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id="general", chat_type="group")
+    instance.handle_tool_call("long_term_memory_reflect", {"query": "open quotes"})
+    instance.shutdown()
+    assert [call.get("exclude_mental_models") for call in fake.reflects] == [True, True]
 
 
 def test_the_owner_is_told_she_uses_what_the_company_and_this_computer_can_read(provider, open_channels):
