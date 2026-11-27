@@ -485,6 +485,18 @@ def test_a_window_chat_that_began_before_the_update_keeps_to_this_computer(provi
     assert "recalled:company-and-own" not in fake.retains[0]["items"][0]["tags"]
 
 
+def test_a_window_chat_resumed_without_a_reset_is_asked_again_whether_it_began_before_the_update(
+    provider, open_channels
+):
+    instance, fake = provider(AUDIENCES, platform="desktop")
+    instance.sync_turn("Quotes go out on the new letterhead", "Noted.")
+    fake.kept_documents["window-old"] = ["audience:installation"]
+    instance.on_session_switch("window-old", reset=False)
+    instance.sync_turn("Anna Ferri's client code is FER-2291", "Noted.")
+    instance.shutdown()
+    assert _scopes(fake)[-1] == [["audience:installation", "recalled:every-audience"]]
+
+
 def test_a_window_chat_whose_start_cannot_be_read_keeps_to_this_computer(provider, open_channels):
     instance, fake = provider(AUDIENCES, platform="desktop")
 

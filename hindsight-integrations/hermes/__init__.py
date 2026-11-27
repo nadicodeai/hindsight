@@ -3339,8 +3339,7 @@ class HindsightMemoryProvider(MemoryProvider):
             self._write_bank_ids = self._build_write_bank_ids()
         self._session_turns = []
         self._turn_counter = self._turn_index = self._last_retained_turn_count = 0
-        if reset:
-            self._from_before = None
+        self._from_before = True if self._from_before and not reset else None
         # The new session reads session_context afresh: the bank may have changed above, and a
         # mental model refreshed since the last session is picked up here, as the docs promise.
         self._session_context_block = None
