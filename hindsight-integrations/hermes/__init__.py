@@ -677,6 +677,7 @@ AUDIENCE = "audience:"
 EVERYONE_INSIDE = AUDIENCE + "company"
 OWNERS_OWN = AUDIENCE + "installation"
 RECALLED_COMPANY_AND_OWN = "recalled:company-and-own"
+RECALLED_EVERY_AUDIENCE = "recalled:every-audience"
 
 
 _RECALL_TYPES = ("world", "experience", "observation")
@@ -925,6 +926,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._shared_with = self._buffered_audience = ""
         self._turn_audience: contextvars.ContextVar[str] = contextvars.ContextVar(f"hindsight_turn_audience_{id(self)}")
         self._session_id = self._parent_session_id = self._document_id = ""
+        self._from_before: bool | None = None
         self._status_callback: Optional[Callable[[str], None]] = None
         # Set from initialize() kwargs; defaults keep _start_embedded_daemon safe when a
         # host constructs the provider without calling initialize() (availability probes do).
@@ -1768,6 +1770,7 @@ class HindsightMemoryProvider(MemoryProvider):
 
         for name in _SESSION_KWARGS:
             setattr(self, f"_{name}", str(kwargs.get(name) or "").strip())
+        self._from_before = None
         self._platform = self._platform or "cli"  # after the loop, which would blank it again
         # The one config every setting below reads: the file with this chat's ``chats`` entry over it.
         self._chat_route = resolve_chat_config(
@@ -2041,13 +2044,41 @@ class HindsightMemoryProvider(MemoryProvider):
     def _observation_scopes_of(self, audience: str) -> Any:
         if not audience:
             return "shared"
-        own = [audience, RECALLED_COMPANY_AND_OWN] if audience == OWNERS_OWN else [audience]
+        own = [audience, self._owner_s_mark()] if audience == OWNERS_OWN else [audience]
         return [own, [EVERYONE_INSIDE]] if self._teaches_the_company(audience) else [own]
 
     def _teaches_the_company(self, audience: str) -> bool:
-        kept_by_the_owner = audience == OWNERS_OWN
+        kept_by_the_owner = audience == OWNERS_OWN and self._owner_s_mark() == RECALLED_COMPANY_AND_OWN
         said_to_an_agent_alone = audience not in ("", EVERYONE_INSIDE) and self._chat_type == "dm"
         return kept_by_the_owner or said_to_an_agent_alone
+
+    def _owner_s_mark(self) -> str:
+        if self._from_before is None:
+            try:
+                self._from_before = any(
+                    self._kept_before(session) for session in (self._session_id, self._parent_session_id) if session
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Memory: whether this chat began before the update could not be read, so it keeps to itself: %r",
+                    exc,
+                )
+                self._from_before = True
+        return RECALLED_EVERY_AUDIENCE if self._from_before else RECALLED_COMPANY_AND_OWN
+
+    def _kept_before(self, session: str) -> bool:
+        for document_id in (session, f"{session}:{OWNERS_OWN}"):
+            try:
+                kept = self._run_hindsight_operation(
+                    lambda client, document_id=document_id: client.documents.get_document(TEAM_BANK, document_id)
+                )
+            except Exception as exc:
+                if _bank_not_written_yet(exc):
+                    continue
+                raise
+            if document_id == session or RECALLED_EVERY_AUDIENCE in (getattr(kept, "tags", None) or ()):
+                return True
+        return False
 
     def _bank_label(self, bank: str) -> str:
         return _BANK_LABELS.get(bank) or ("this person's own memory" if bank == self._bank_id else f"the memory {bank}")
@@ -2715,7 +2746,7 @@ class HindsightMemoryProvider(MemoryProvider):
             f"by:{self._speaker}",
             *([f"agent:{self._agent_identity}"] if self._agent_identity else []),
             *([audience] if audience else []),
-            *([RECALLED_COMPANY_AND_OWN] if audience == OWNERS_OWN else []),
+            *([self._owner_s_mark()] if audience == OWNERS_OWN else []),
         ]
 
     def _build_metadata(self, *, message_count: int, turn_index: int) -> Dict[str, str]:
@@ -3308,6 +3339,8 @@ class HindsightMemoryProvider(MemoryProvider):
             self._write_bank_ids = self._build_write_bank_ids()
         self._session_turns = []
         self._turn_counter = self._turn_index = self._last_retained_turn_count = 0
+        if reset:
+            self._from_before = None
         # The new session reads session_context afresh: the bank may have changed above, and a
         # mental model refreshed since the last session is picked up here, as the docs promise.
         self._session_context_block = None

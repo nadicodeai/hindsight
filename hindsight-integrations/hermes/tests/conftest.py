@@ -176,6 +176,10 @@ class FakeReflectResponse:
         self.text = text
 
 
+class _NotFound(Exception):
+    status = 404
+
+
 class FakeClient:
     """Records the calls the plugin makes against the Hindsight client."""
 
@@ -185,6 +189,13 @@ class FakeClient:
         self.reflects: list[dict] = []
         self._recall_texts = list(recall_texts)
         self._reflect_text = reflect_text
+        self.kept_documents: dict[str, list[str]] = {}
+        self.documents = types.SimpleNamespace(get_document=self._get_document)
+
+    async def _get_document(self, bank_id, document_id):
+        if document_id not in self.kept_documents:
+            raise _NotFound(document_id)
+        return types.SimpleNamespace(id=document_id, tags=self.kept_documents[document_id])
 
     async def aretain_batch(self, **kwargs):
         self.retains.append(kwargs)

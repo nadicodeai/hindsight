@@ -469,6 +469,34 @@ def test_the_owner_s_turns_go_to_a_document_of_their_own_audience_not_one_kept_b
     assert _documents(fake)[0].endswith(":audience:installation:audience:company")
 
 
+@pytest.mark.parametrize(
+    "kept_before",
+    [{"window-1": ["audience:installation"]}, {"window-0:audience:installation": ["recalled:every-audience"]}],
+    ids=["its own document from before the update", "a chat it continues that did"],
+)
+def test_a_window_chat_that_began_before_the_update_keeps_to_this_computer(provider, open_channels, kept_before):
+    instance, fake = provider(AUDIENCES, platform="desktop")
+    fake.kept_documents.update(kept_before)
+    instance._session_id, instance._parent_session_id = "window-1", "window-0"
+    instance.sync_turn("Anna Ferri's client code is FER-2291", "Noted.")
+    instance.shutdown()
+    assert _scopes(fake) == [[["audience:installation", "recalled:every-audience"]]]
+    assert "recalled:every-audience" in fake.retains[0]["items"][0]["tags"]
+    assert "recalled:company-and-own" not in fake.retains[0]["items"][0]["tags"]
+
+
+def test_a_window_chat_whose_start_cannot_be_read_keeps_to_this_computer(provider, open_channels):
+    instance, fake = provider(AUDIENCES, platform="desktop")
+
+    async def unreadable(bank_id, document_id):
+        raise ConnectionError("the memory service does not answer")
+
+    fake.documents.get_document = unreadable
+    instance.sync_turn("Anna Ferri's client code is FER-2291", "Noted.")
+    instance.shutdown()
+    assert _scopes(fake) == [[["audience:installation", "recalled:every-audience"]]]
+
+
 def test_an_outside_person_s_memories_share_one_set_of_summaries_whatever_is_configured(provider):
     instance, fake = provider({**INSIDE, "observation_scopes": [["audience:*"]]}, platform="telegram", user_id="77")
     instance.sync_turn("My order number is 4411", "Noted.")
