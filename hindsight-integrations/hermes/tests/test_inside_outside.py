@@ -538,6 +538,72 @@ def test_a_turn_saved_after_its_channel_opens_keeps_the_audience_it_was_said_in(
     ]
 
 
+def _said_to(monkeypatch, said_now: dict[str, object]) -> None:
+    def said_to(platform, chat_id, setting):
+        if isinstance(said_now[chat_id], Exception):
+            raise said_now[chat_id]
+        return said_now[chat_id]
+
+    monkeypatch.setitem(sys.modules, "company_audiences", types.SimpleNamespace(said_to=said_to))
+
+
+COMPANY_TOO = [["audience:buzz:lavoro-luca"], ["audience:company"]]
+ITS_OWN = [["audience:buzz:lavoro-luca"]]
+
+
+@pytest.mark.parametrize(
+    ("first", "then", "summarised"),
+    [
+        ("the agents", "its people", [COMPANY_TOO, ITS_OWN]),
+        (ConnectionError("the relay does not answer"), "the agents", [ITS_OWN, COMPANY_TOO]),
+    ],
+    ids=["after a colleague joined the chat", "after a turn whose chat could not be read"],
+)
+def test_a_turn_saved_after_the_next_one_started_is_summarised_as_it_was_said(
+    provider, monkeypatch, first, then, summarised
+):
+    said_now = {"lavoro-luca": first}
+    _said_to(monkeypatch, said_now)
+    instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id="lavoro-luca", chat_type="group")
+    instance.on_turn_start(1, "The price lists are in Commerciale/Listini")
+    held_save = contextvars.copy_context()
+    said_now["lavoro-luca"] = then
+    instance.on_turn_start(2, "Marco leaves in March")
+    held_save.run(instance.sync_turn, "The price lists are in Commerciale/Listini", "Noted.")
+    instance.sync_turn("Marco leaves in March", "Noted.")
+    instance.shutdown()
+    assert _scopes(fake) == summarised
+    first_document, second_document = _documents(fake)
+    assert first_document != second_document
+
+
+def test_turns_waiting_to_be_saved_together_leave_before_a_turn_said_with_a_colleague_in_the_chat(
+    provider, monkeypatch
+):
+    said_now = {"lavoro-luca": "the agents"}
+    _said_to(monkeypatch, said_now)
+    instance, fake = provider(
+        {**AUDIENCES, "retain_every_n_turns": 2},
+        platform="buzz",
+        user_id="ab12",
+        chat_id="lavoro-luca",
+        chat_type="group",
+    )
+    instance.on_turn_start(1, "The price lists are in Commerciale/Listini")
+    instance.sync_turn("The price lists are in Commerciale/Listini", "Noted.")
+    said_now["lavoro-luca"] = "its people"
+    instance.on_turn_start(2, "Marco leaves in March")
+    instance.sync_turn("Marco leaves in March", "Noted.")
+    instance.shutdown()
+    saved = [
+        (json.loads(call["items"][0]["content"])[0]["content"], scopes) for call, scopes in zip(fake.retains, _scopes(fake))
+    ]
+    assert saved == [
+        ("ab12: The price lists are in Commerciale/Listini", COMPANY_TOO),
+        ("ab12: Marco leaves in March", ITS_OWN),
+    ]
+
+
 def test_a_recall_prepared_in_a_private_turn_is_not_used_after_the_channel_opens(provider, monkeypatch):
     open_now = {"paghe": False}
     _channel_open(monkeypatch, open_now)

@@ -923,12 +923,16 @@ class HindsightMemoryProvider(MemoryProvider):
         self._prefetch_method = "recall"  # "recall" or "reflect"
         for name in _SESSION_KWARGS:
             setattr(self, f"_{name}", "")
-        # The audience of the latest turn to start; each turn's own is bound in its context, which
-        # Hermes carries into the background worker that saves the turn.
+        # The audience of the latest turn to start, and whether it was said to the agents; each
+        # turn's own are bound in its context, which Hermes carries into the background worker that
+        # saves the turn.
         self._shared_with = self._buffered_audience = ""
+        self._said_to_the_agents = self._buffered_said_to_the_agents = False
         self._turn_audience: contextvars.ContextVar[str] = contextvars.ContextVar(f"hindsight_turn_audience_{id(self)}")
+        self._turn_said_to_the_agents: contextvars.ContextVar[bool] = contextvars.ContextVar(
+            f"hindsight_turn_said_to_the_agents_{id(self)}"
+        )
         self._session_id = self._parent_session_id = self._document_id = ""
-        self._said_to_the_agents = False
         self._status_callback: Optional[Callable[[str], None]] = None
         # Set from initialize() kwargs; defaults keep _start_embedded_daemon safe when a
         # host constructs the provider without calling initialize() (availability probes do).
@@ -1968,6 +1972,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._audience = bool(self._inside_platforms)
         self._bank_named = False
         self._shared_with = self._buffered_audience = ""
+        self._said_to_the_agents = self._buffered_said_to_the_agents = False
         if not self._audience:
             self._person, self._inside = "", True
             self._read_banks = [self._bank_id]
@@ -1988,10 +1993,14 @@ class HindsightMemoryProvider(MemoryProvider):
         self._bank_id = TEAM_BANK if self._inside else _person_bank(self._person)
         self._write_bank_ids = [self._bank_id]
         self._read_banks = [self._bank_id, PUBLIC_BANK]
-        self._shared_with = (
-            OWNERS_OWN if owner else self._conversation_audience(cfg.get("audience_resolver")) if self._inside else ""
+        self._shared_with, self._said_to_the_agents = (
+            (OWNERS_OWN, False)
+            if owner
+            else self._conversation_audience(cfg.get("audience_resolver"))
+            if self._inside
+            else ("", False)
         )
-        self._buffered_audience = self._shared_with
+        self._buffered_audience, self._buffered_said_to_the_agents = self._shared_with, self._said_to_the_agents
         logger.info(
             "Memory: person=%s inside=%s reads=%s shared_with=%s",
             self._person,
@@ -2000,33 +2009,33 @@ class HindsightMemoryProvider(MemoryProvider):
             self._shared_with,
         )
 
-    def _conversation_audience(self, resolver: object) -> str:
-        """``audience:company`` when the resolver answers that everyone in the company can read this
-        conversation, else the conversation's own audience: a resolver missing, failing or unsure keeps
-        what is said here with the people who were here, and teaches the company only from a direct
-        message."""
+    def _conversation_audience(self, resolver: object) -> tuple[str, bool]:
+        """The conversation's audience, and whether it is said to the agents. ``audience:company``
+        when the resolver answers that everyone in the company can read this conversation, else the
+        conversation's own audience: a resolver missing, failing or unsure keeps what is said here
+        with the people who were here, and does not call it said to the agents."""
         own = f"{AUDIENCE}{self._platform.lower()}:{self._chat_id or self._user_id}"
-        self._said_to_the_agents = False
         if not resolver or not self._chat_id:
-            return own
+            return own, False
         try:
             module, _, function = str(resolver).partition(":")
             answers = getattr(importlib.import_module(module), function)
             said_to = answers(platform=self._platform, chat_id=self._chat_id, setting=_scoped_setting)
         except Exception as exc:
             logger.warning("Memory: the audience of %s could not be read, so it stays its own: %r", own, exc)
-            return own
-        self._said_to_the_agents = said_to == SAID_TO_THE_AGENTS
-        return EVERYONE_INSIDE if said_to == SAID_TO_EVERYONE else own
+            return own, False
+        return (EVERYONE_INSIDE if said_to == SAID_TO_EVERYONE else own), said_to == SAID_TO_THE_AGENTS
 
     def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
-        """A member can open or close a channel while the session lasts, so its audience is read
-        again on every turn and bound to the turn: the memory manager saves a turn on its background
-        worker, possibly after the next turn started, under the context the turn ran in."""
+        """A member can open or close a channel, or bring a colleague into a chat kept with the
+        agents, while the session lasts. So the audience is read again on every turn and bound to
+        the turn with whether it is said to the agents: the memory manager saves a turn on its
+        background worker, possibly after the next turn started, under the context the turn ran in."""
         if not getattr(self, "_audience", False) or self._shared_with in ("", OWNERS_OWN):
             return
-        now = self._conversation_audience(self._config.get("audience_resolver"))
+        now, self._said_to_the_agents = self._conversation_audience(self._config.get("audience_resolver"))
         self._turn_audience.set(now)
+        self._turn_said_to_the_agents.set(self._said_to_the_agents)
         if now != self._shared_with:
             logger.info("Memory: %s is now shared with %s", self._shared_with, now)
             self._shared_with = now
@@ -2048,7 +2057,7 @@ class HindsightMemoryProvider(MemoryProvider):
         return [[audience], [EVERYONE_INSIDE]] if self._teaches_the_company(audience) else [[audience]]
 
     def _teaches_the_company(self, audience: str) -> bool:
-        said_to_the_agents = self._chat_type == "dm" or self._said_to_the_agents
+        said_to_the_agents = self._chat_type == "dm" or self._turn_said_to_the_agents.get(self._said_to_the_agents)
         return audience == OWNERS_OWN or (audience not in ("", EVERYONE_INSIDE) and said_to_the_agents)
 
     def _bank_label(self, bank: str) -> str:
@@ -2920,13 +2929,15 @@ class HindsightMemoryProvider(MemoryProvider):
             self._session_id = str(session_id).strip()
 
         audience = self._turn_audience.get(self._shared_with)
-        if audience != self._buffered_audience:
-            # Turns said under another audience leave first, under their own tag, in their own document.
+        said_to_the_agents = self._turn_said_to_the_agents.get(self._said_to_the_agents)
+        if (audience, said_to_the_agents) != (self._buffered_audience, self._buffered_said_to_the_agents):
+            # Turns said under another audience, or said to the agents when these are not, leave
+            # first, under their own tag and summaries, in their own document.
             self._flush_buffered_turns("flush-on-audience")
             self._session_turns = []
             self._last_retained_turn_count = 0
             self._document_id = _mint_document_id(self._session_id)
-            self._buffered_audience = audience
+            self._buffered_audience, self._buffered_said_to_the_agents = audience, said_to_the_agents
         self._session_turns.append(
             json.dumps(
                 self._build_turn_messages(
@@ -3246,15 +3257,19 @@ class HindsightMemoryProvider(MemoryProvider):
         if not self._session_turns or self._shutting_down.is_set():
             return
         audience = self._buffered_audience
-        document_id, update_mode = self._resolve_retain_target(self._document_id, audience)
-        job = self._make_turn_retain_job(
-            list(self._session_turns),
-            audience=audience,
-            document_id=document_id,
-            update_mode=update_mode,
-            label=label,
-            track_ops=False,
-        )
+        as_they_were_said = self._turn_said_to_the_agents.set(self._buffered_said_to_the_agents)
+        try:
+            document_id, update_mode = self._resolve_retain_target(self._document_id, audience)
+            job = self._make_turn_retain_job(
+                list(self._session_turns),
+                audience=audience,
+                document_id=document_id,
+                update_mode=update_mode,
+                label=label,
+                track_ops=False,
+            )
+        finally:
+            self._turn_said_to_the_agents.reset(as_they_were_said)
         # Same writer queue as sync_turn: FIFO behind queued retains, no two threads
         # racing aretain_batch on one document, shutdown drain intact, and a failed flush
         # resent like any other retain.
