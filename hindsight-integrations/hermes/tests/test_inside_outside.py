@@ -12,18 +12,19 @@ import pytest
 from conftest import FakeClient
 
 INSIDE = {"inside_platforms": "buzz"}
-AUDIENCES = {**INSIDE, "audience_resolver": "company_audiences:open_to_everyone"}
+AUDIENCES = {**INSIDE, "audience_resolver": "company_audiences:said_to"}
+SAID_TO = {"general": "everyone", "lavoro-luca": "the agents"}
 
 
 @pytest.fixture
 def open_channels(monkeypatch):
     asked = []
 
-    def open_to_everyone(platform, chat_id, setting):
+    def said_to(platform, chat_id, setting):
         asked.append((platform, chat_id))
-        return chat_id == "general"
+        return SAID_TO.get(chat_id, "")
 
-    monkeypatch.setitem(sys.modules, "company_audiences", types.SimpleNamespace(open_to_everyone=open_to_everyone))
+    monkeypatch.setitem(sys.modules, "company_audiences", types.SimpleNamespace(said_to=said_to))
     return asked
 
 
@@ -365,21 +366,12 @@ def _scopes(fake: FakeClient) -> list[object]:
 
 def _filters(fake: FakeClient) -> list[tuple[str, object, str | None]]:
     def readable(groups):
-        group = groups[0]
-        if "or" in group:
-            return tuple((tuple(each["tags"]), each["match"]) for each in group["or"]), "or"
-        return tuple(group["tags"]), group["match"]
+        return tuple(groups[0]["tags"]), groups[0]["match"]
 
     return [
         (call["bank_id"], *(readable(call["tag_groups"]) if call.get("tag_groups") else (None, None)))
         for call in fake.recalls
     ]
-
-
-NADIA_S_OWN = (
-    (("audience:company",), "any_strict"),
-    (("audience:installation", "recalled:company-and-own"), "all_strict"),
-)
 
 
 @pytest.mark.parametrize(
@@ -400,8 +392,15 @@ NADIA_S_OWN = (
             [["audience:buzz:dm-luca"], ["audience:company"]],
             ("audience:company", "audience:buzz:dm-luca"),
         ),
+        (
+            "lavoro-luca",
+            "group",
+            "audience:buzz:lavoro-luca",
+            [["audience:buzz:lavoro-luca"], ["audience:company"]],
+            ("audience:company", "audience:buzz:lavoro-luca"),
+        ),
     ],
-    ids=["an open channel", "a private channel", "a direct message"],
+    ids=["an open channel", "a private channel", "a direct message", "a chat a person keeps with the agents"],
 )
 def test_an_inside_conversation_keeps_and_recalls_within_its_audience(
     provider, open_channels, chat, chat_type, kept, summarised, recalled
@@ -424,9 +423,11 @@ def test_the_owner_keeps_what_they_say_on_their_computer_and_recalls_the_company
     instance.handle_tool_call("long_term_memory_search", {"query": "letterhead"})
     instance.shutdown()
     assert _tags(fake) == [{"audience:installation"}]
-    assert _scopes(fake) == [[["audience:installation", "recalled:company-and-own"], ["audience:company"]]]
-    assert "recalled:company-and-own" in fake.retains[0]["items"][0]["tags"]
-    assert _filters(fake) == [("company", NADIA_S_OWN, "or"), ("public", None, None)]
+    assert _scopes(fake) == [[["audience:installation"], ["audience:company"]]]
+    assert _filters(fake) == [
+        ("company", ("audience:company", "audience:installation"), "any_strict"),
+        ("public", None, None),
+    ]
     assert open_channels == []
 
 
@@ -437,7 +438,7 @@ def test_a_scheduled_task_recalls_only_what_everyone_in_the_company_may_read(pro
     instance.handle_tool_call("long_term_memory_reflect", {"query": "open quotes"})
     instance.shutdown()
     assert _tags(fake) == [{"audience:installation"}]
-    assert _scopes(fake) == [[["audience:installation", "recalled:company-and-own"], ["audience:company"]]]
+    assert _scopes(fake) == [[["audience:installation"], ["audience:company"]]]
     assert _filters(fake) == [("company", ("audience:company",), "any_strict"), ("public", None, None)]
     assert [(call["bank_id"], call.get("tag_groups")) for call in fake.reflects] == [
         (
@@ -462,71 +463,11 @@ def test_a_scheduled_task_cannot_look_in_a_contact_s_memory(provider, open_chann
     assert _searched(fake) == []
 
 
-def test_the_owner_s_turns_go_to_a_document_of_their_own_audience_not_one_kept_before(provider, open_channels):
+def test_the_owner_s_turns_go_to_a_document_of_their_own_audience(provider, open_channels):
     instance, fake = provider(AUDIENCES, platform="desktop")
     instance.sync_turn("Quotes go out on the new letterhead", "Noted.")
     instance.shutdown()
     assert _documents(fake)[0].endswith(":audience:installation:audience:company")
-
-
-@pytest.mark.parametrize(
-    "kept_before",
-    [{"window-1": ["audience:installation"]}, {"window-0:audience:installation": ["recalled:every-audience"]}],
-    ids=["its own document from before the update", "a chat it continues that did"],
-)
-def test_a_window_chat_that_began_before_the_update_keeps_to_this_computer(provider, open_channels, kept_before):
-    instance, fake = provider(AUDIENCES, platform="desktop")
-    fake.kept_documents.update(kept_before)
-    instance._session_id, instance._parent_session_id = "window-1", "window-0"
-    instance.sync_turn("Anna Ferri's client code is FER-2291", "Noted.")
-    instance.shutdown()
-    assert _scopes(fake) == [[["audience:installation", "recalled:every-audience"]]]
-    assert "recalled:every-audience" in fake.retains[0]["items"][0]["tags"]
-    assert "recalled:company-and-own" not in fake.retains[0]["items"][0]["tags"]
-
-
-def test_a_window_chat_resumed_without_a_reset_is_asked_again_whether_it_began_before_the_update(
-    provider, open_channels
-):
-    instance, fake = provider(AUDIENCES, platform="desktop")
-    instance.sync_turn("Quotes go out on the new letterhead", "Noted.")
-    fake.kept_documents["window-old"] = ["audience:installation"]
-    instance.on_session_switch("window-old", reset=False)
-    instance.sync_turn("Anna Ferri's client code is FER-2291", "Noted.")
-    instance.shutdown()
-    assert _scopes(fake)[-1] == [["audience:installation", "recalled:every-audience"]]
-
-
-def test_a_window_chat_whose_start_cannot_be_read_keeps_that_turn_to_this_computer_and_asks_again(
-    provider, open_channels
-):
-    instance, fake = provider(AUDIENCES, platform="desktop")
-
-    async def unreadable(bank_id, document_id):
-        raise ConnectionError("the memory service does not answer")
-
-    fake.documents.get_document = unreadable
-    instance.sync_turn("Anna Ferri's client code is FER-2291", "Noted.")
-    del fake.documents.get_document
-    fake.documents.get_document = fake._get_document
-    instance.sync_turn("Quotes go out on the new letterhead", "Noted.")
-    instance.shutdown()
-    assert _scopes(fake) == [
-        [["audience:installation", "recalled:not-known"]],
-        [["audience:installation", "recalled:company-and-own"], ["audience:company"]],
-    ]
-
-
-def test_a_window_chat_that_began_before_the_update_saves_nothing_for_everyone(provider, open_channels):
-    instance, fake = provider(AUDIENCES, platform="desktop")
-    fake.kept_documents["window-1"] = ["audience:installation"]
-    instance._session_id = "window-1"
-    result = json.loads(
-        instance.handle_tool_call("long_term_memory_save", {"content": "Rossi's quote is 12k", "for": "everyone"})
-    )
-    instance.shutdown()
-    assert [call["bank_id"] for call in fake.retains] == ["company"]
-    assert result["result"].startswith("Saved only for the people in this conversation")
 
 
 def test_an_outside_person_s_memories_share_one_set_of_summaries_whatever_is_configured(provider):
@@ -541,7 +482,7 @@ def test_a_conversation_whose_audience_cannot_be_read_keeps_to_itself(provider, 
     def unreachable(**_):
         raise ConnectionError("the relay does not answer")
 
-    monkeypatch.setitem(sys.modules, "company_audiences", types.SimpleNamespace(open_to_everyone=unreachable))
+    monkeypatch.setitem(sys.modules, "company_audiences", types.SimpleNamespace(said_to=unreachable))
     instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id="general", chat_type="group")
     instance.sync_turn("Bonuses arrive on 27 November", "Noted.")
     instance.shutdown()
@@ -553,7 +494,7 @@ def test_a_channel_made_private_during_a_session_keeps_what_is_said_after_with_i
     monkeypatch.setitem(
         sys.modules,
         "company_audiences",
-        types.SimpleNamespace(open_to_everyone=lambda platform, chat_id, setting: open_now[chat_id]),
+        types.SimpleNamespace(said_to=lambda platform, chat_id, setting: "everyone" if open_now[chat_id] else ""),
     )
     instance, fake = provider(AUDIENCES, platform="buzz", user_id="ab12", chat_id="general", chat_type="group")
     instance.on_turn_start(1, "Bonuses arrive on 27 November")
@@ -573,7 +514,7 @@ def _channel_open(monkeypatch, open_now: dict[str, bool]) -> None:
     monkeypatch.setitem(
         sys.modules,
         "company_audiences",
-        types.SimpleNamespace(open_to_everyone=lambda platform, chat_id, setting: open_now[chat_id]),
+        types.SimpleNamespace(said_to=lambda platform, chat_id, setting: "everyone" if open_now[chat_id] else ""),
     )
 
 
